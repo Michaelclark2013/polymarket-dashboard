@@ -1,0 +1,1043 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Michael Clark's Autonomous Trading Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  html, body { background: #0a0a0b; }
+  body { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .glow-green { box-shadow: 0 0 0 1px rgba(34,197,94,0.4), 0 0 24px -8px rgba(34,197,94,0.35); }
+  .glow-red   { box-shadow: 0 0 0 1px rgba(239,68,68,0.4),  0 0 24px -8px rgba(239,68,68,0.35); }
+  .glow-amber { box-shadow: 0 0 0 1px rgba(245,158,11,0.4), 0 0 24px -8px rgba(245,158,11,0.35); }
+  .tab-active { background: linear-gradient(180deg,#1f2937,#0b1220); color:#fff; border-color:#10b981 !important; }
+  .pulse-dot { display:inline-block; width:8px; height:8px; border-radius:9999px; }
+  .pulse-dot.live { background:#22c55e; box-shadow:0 0 0 0 rgba(34,197,94,.7); animation:pulse 1.4s infinite; }
+  .pulse-dot.idle { background:#71717a; }
+  .pulse-dot.err  { background:#ef4444; }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(34,197,94,.7)} 70%{box-shadow:0 0 0 10px rgba(34,197,94,0)} 100%{box-shadow:0 0 0 0 rgba(34,197,94,0)} }
+  .scrollbar::-webkit-scrollbar{width:8px;height:8px}
+  .scrollbar::-webkit-scrollbar-thumb{background:#27272a;border-radius:4px}
+  .scrollbar::-webkit-scrollbar-track{background:transparent}
+  .ladder-row { display:grid; grid-template-columns: 1fr 1fr 1fr; font-size:12px; padding:2px 6px; }
+  .num { font-variant-numeric: tabular-nums; }
+  details > summary { list-style: none; cursor:pointer; }
+  details > summary::-webkit-details-marker { display:none; }
+  .heatcell { font-size:10px; }
+</style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen">
+<!-- HEADER -->
+<header class="border-b border-zinc-800 bg-zinc-950/95 backdrop-blur sticky top-0 z-40">
+  <div class="max-w-[1500px] mx-auto px-4 py-3 flex items-center gap-4">
+    <div class="flex items-center gap-2">
+      <div class="w-8 h-8 rounded bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center font-bold text-zinc-950">P</div>
+      <div>
+        <div class="text-sm font-bold tracking-wide">MICHAEL CLARK'S AUTONOMOUS TRADING DASHBOARD</div>
+        <div class="text-[10px] text-zinc-500 -mt-0.5">polymarket · aggressive · high-conviction · active</div>
+      </div>
+    </div>
+    <nav id="tabs" class="ml-6 flex gap-1 text-xs flex-wrap">
+      <!-- tabs injected -->
+    </nav>
+    <div class="ml-auto flex items-center gap-3 text-xs">
+      <div class="flex items-center gap-2 px-3 py-1.5 rounded border border-zinc-800 bg-zinc-900">
+        <span id="wsDot" class="pulse-dot idle"></span>
+        <span id="wsLabel" class="text-zinc-400">WS: idle</span>
+        <button id="wsToggle" class="ml-1 text-emerald-400 hover:text-emerald-300">connect</button>
+      </div>
+      <div class="px-3 py-1.5 rounded border border-zinc-800 bg-zinc-900">
+        <span class="text-zinc-500">BANKROLL</span>
+        <input id="bankroll" type="number" class="bg-transparent w-24 text-right outline-none text-emerald-400 font-bold" />
+      </div>
+      <button id="resetData" class="px-2 py-1.5 rounded border border-zinc-800 hover:border-red-500/50 text-zinc-400 hover:text-red-400">reset</button>
+    </div>
+  </div>
+</header>
+
+<!-- QUICK START -->
+<section id="quickStart" class="max-w-[1500px] mx-auto px-4 pt-4">
+  <div class="rounded-lg border border-emerald-500/30 bg-gradient-to-r from-emerald-950/40 via-zinc-950 to-cyan-950/30 p-4 flex flex-wrap items-center gap-4">
+    <div>
+      <div class="text-emerald-400 text-xs tracking-widest font-bold">QUICK START · GET TRADING NOW</div>
+      <div class="text-sm text-zinc-300 mt-1">3 moves to first edge: pick a market → run Analyzer → size with the Sizer → log it in Portfolio. Live tab streams prices from Polymarket.</div>
+    </div>
+    <div class="ml-auto flex gap-2 flex-wrap">
+      <button data-jump="analyzer" class="px-3 py-2 rounded bg-emerald-500 text-zinc-950 font-bold text-xs hover:bg-emerald-400">1. ANALYZE EDGE</button>
+      <button data-jump="sizer"    class="px-3 py-2 rounded bg-cyan-500   text-zinc-950 font-bold text-xs hover:bg-cyan-400">2. SIZE POSITION</button>
+      <button data-jump="portfolio" class="px-3 py-2 rounded bg-amber-500 text-zinc-950 font-bold text-xs hover:bg-amber-400">3. LOG TRADE</button>
+      <button data-jump="live"     class="px-3 py-2 rounded bg-fuchsia-500 text-zinc-950 font-bold text-xs hover:bg-fuchsia-400">LIVE PRICES</button>
+      <button data-jump="scanner"  class="px-3 py-2 rounded bg-zinc-800 text-zinc-200 text-xs hover:bg-zinc-700">SCANNER</button>
+    </div>
+  </div>
+</section>
+
+<main class="max-w-[1500px] mx-auto px-4 py-5 space-y-6">
+
+<!-- =========================================================== -->
+<!-- DASHBOARD -->
+<!-- =========================================================== -->
+<section data-pane="dashboard" class="space-y-4">
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div class="rounded border border-zinc-800 bg-zinc-900/50 p-3"><div class="text-[10px] text-zinc-500 tracking-widest">BANKROLL</div><div id="kpiBank" class="text-2xl font-bold text-emerald-400 num">$0</div></div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/50 p-3"><div class="text-[10px] text-zinc-500 tracking-widest">OPEN RISK</div><div id="kpiRisk" class="text-2xl font-bold text-amber-400 num">$0</div></div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/50 p-3"><div class="text-[10px] text-zinc-500 tracking-widest">REALIZED P&amp;L</div><div id="kpiPnl" class="text-2xl font-bold num">$0</div></div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/50 p-3"><div class="text-[10px] text-zinc-500 tracking-widest">WIN RATE / EV</div><div id="kpiWin" class="text-2xl font-bold num">--</div></div>
+  </div>
+  <div class="grid lg:grid-cols-3 gap-4">
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4 lg:col-span-2">
+      <div class="flex items-center justify-between mb-2"><div class="text-xs tracking-widest text-zinc-400">EQUITY CURVE</div><div class="text-[10px] text-zinc-500">cumulative realized P&amp;L</div></div>
+      <canvas id="equityChart" height="160"></canvas>
+    </div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4">
+      <div class="text-xs tracking-widest text-zinc-400 mb-2">RECENT TRADES</div>
+      <div id="recentTrades" class="space-y-1 text-xs"></div>
+    </div>
+  </div>
+  <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4">
+    <div class="text-xs tracking-widest text-zinc-400 mb-3">AGGRESSIVE RULES OF ENGAGEMENT</div>
+    <ul class="grid md:grid-cols-2 gap-x-6 gap-y-1 text-xs text-zinc-300 list-disc pl-4">
+      <li>Only trade when modeled edge ≥ 5 cents AND confidence ≥ 60%.</li>
+      <li>Size with fractional Kelly. Aggressive = 0.5×, Max Conviction = 0.75× (never 1×).</li>
+      <li>Cap single-market risk at 10% bankroll. Cap correlated cluster at 25%.</li>
+      <li>Cut at -40% of stake when thesis breaks. Don't average into a broken thesis.</li>
+      <li>Take partial profit at +50% mark-to-market on high-IV positions.</li>
+      <li>Re-evaluate every position daily on close. Log a reason on every entry &amp; exit.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- =========================================================== -->
+<!-- ANALYZER -->
+<!-- =========================================================== -->
+<section data-pane="analyzer" class="hidden space-y-4">
+  <div class="grid lg:grid-cols-3 gap-4">
+    <div class="lg:col-span-2 rounded border border-zinc-800 bg-zinc-900/40 p-4 space-y-3">
+      <div class="flex items-center justify-between"><div class="text-xs tracking-widest text-zinc-400">EDGE &amp; PROBABILITY ANALYZER</div><span class="text-[10px] text-zinc-500">multi-factor · weighted</span></div>
+      <div class="grid grid-cols-2 gap-3 text-xs">
+        <label class="space-y-1"><div class="text-zinc-500">Market</div><input id="a_market" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
+        <label class="space-y-1"><div class="text-zinc-500">Side (YES/NO)</div><select id="a_side" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"><option>YES</option><option>NO</option></select></label>
+        <label class="space-y-1"><div class="text-zinc-500">Market price (¢ / 0–1)</div><input id="a_price" type="number" step="0.01" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
+        <label class="space-y-1"><div class="text-zinc-500">Days to resolution</div><input id="a_days" type="number" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
+      </div>
+      <div class="text-[10px] tracking-widest text-zinc-500 pt-2">FACTOR WEIGHTING (your subjective probability)</div>
+      <div id="factors" class="space-y-2"></div>
+      <div class="flex gap-2 pt-2">
+        <button id="a_save" class="px-3 py-1.5 rounded bg-emerald-500 text-zinc-950 font-bold text-xs">SAVE TO SCANNER</button>
+        <button id="a_size" class="px-3 py-1.5 rounded bg-cyan-500 text-zinc-950 font-bold text-xs">SEND TO SIZER →</button>
+        <button id="a_clear" class="ml-auto px-3 py-1.5 rounded border border-zinc-800 text-zinc-400 text-xs">clear</button>
+      </div>
+    </div>
+    <div class="space-y-3">
+      <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4">
+        <div class="text-[10px] tracking-widest text-zinc-500">WEIGHTED FAIR PROBABILITY</div>
+        <div id="o_fair" class="text-4xl font-bold text-cyan-300 num">--</div>
+        <div class="text-[10px] text-zinc-500 mt-1">market-implied: <span id="o_implied">--</span></div>
+      </div>
+      <div id="o_edgeBox" class="rounded border border-zinc-800 bg-zinc-900/40 p-4">
+        <div class="text-[10px] tracking-widest text-zinc-500">RAW EDGE (¢)</div>
+        <div id="o_edge" class="text-4xl font-bold num">--</div>
+        <div class="text-[10px] text-zinc-500 mt-1">EV per $1: <span id="o_ev">--</span></div>
+      </div>
+      <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4">
+        <div class="text-[10px] tracking-widest text-zinc-500">VERDICT</div>
+        <div id="o_verdict" class="text-xl font-bold num">--</div>
+        <div id="o_verdictWhy" class="text-[11px] text-zinc-400 mt-1"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================== -->
+<!-- SIZER -->
+<!-- =========================================================== -->
+<section data-pane="sizer" class="hidden space-y-4">
+  <div class="grid lg:grid-cols-2 gap-4">
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4 space-y-3">
+      <div class="flex items-center justify-between"><div class="text-xs tracking-widest text-zinc-400">POSITION SIZING CALCULATOR</div></div>
+      <div class="grid grid-cols-2 gap-3 text-xs">
+        <label class="space-y-1"><div class="text-zinc-500">Bankroll</div><input id="s_bank" type="number" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
+        <label class="space-y-1"><div class="text-zinc-500">Fair p (0–1)</div><input id="s_p" type="number" step="0.01" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
+        <label class="space-y-1"><div class="text-zinc-500">Market price (¢)</div><input id="s_price" type="number" step="0.01" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
+        <label class="space-y-1"><div class="text-zinc-500">Max per-trade %</div><input id="s_cap" type="number" step="0.5" value="10" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
+      </div>
+      <div class="text-[10px] tracking-widest text-zinc-500 pt-2">MODE</div>
+      <div class="grid grid-cols-3 gap-2 text-xs">
+        <button data-mode="balanced"  class="modeBtn px-3 py-2 rounded border border-zinc-800">BALANCED · 0.25 K</button>
+        <button data-mode="aggressive" class="modeBtn px-3 py-2 rounded border border-zinc-800">AGGRESSIVE · 0.50 K</button>
+        <button data-mode="max"        class="modeBtn px-3 py-2 rounded border border-zinc-800">MAX CONVICTION · 0.75 K</button>
+      </div>
+    </div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4 space-y-3">
+      <div class="text-xs tracking-widest text-zinc-400">SIZING OUTPUT</div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><div class="text-[10px] tracking-widest text-zinc-500">FULL KELLY %</div><div id="s_k" class="text-2xl font-bold num">--</div></div>
+        <div><div class="text-[10px] tracking-widest text-zinc-500">USED FRACTION</div><div id="s_kFrac" class="text-2xl font-bold num">--</div></div>
+        <div><div class="text-[10px] tracking-widest text-zinc-500">SUGGESTED STAKE</div><div id="s_stake" class="text-3xl font-bold text-emerald-400 num">$0</div></div>
+        <div><div class="text-[10px] tracking-widest text-zinc-500">SHARES (≈)</div><div id="s_shares" class="text-3xl font-bold text-cyan-300 num">0</div></div>
+        <div><div class="text-[10px] tracking-widest text-zinc-500">MAX LOSS</div><div id="s_loss" class="text-xl font-bold text-red-400 num">$0</div></div>
+        <div><div class="text-[10px] tracking-widest text-zinc-500">MAX WIN</div><div id="s_win" class="text-xl font-bold text-emerald-400 num">$0</div></div>
+        <div class="col-span-2"><div class="text-[10px] tracking-widest text-zinc-500">EXPECTED VALUE</div><div id="s_ev" class="text-2xl font-bold num">$0</div></div>
+      </div>
+      <button id="s_open" class="w-full px-3 py-2 rounded bg-emerald-500 text-zinc-950 font-bold text-xs">OPEN POSITION IN PORTFOLIO</button>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================== -->
+<!-- SIMULATOR -->
+<!-- =========================================================== -->
+<section data-pane="simulator" class="hidden space-y-4">
+  <div class="grid lg:grid-cols-2 gap-4">
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4 space-y-3">
+      <div class="text-xs tracking-widest text-zinc-400">TRADE SIMULATOR · MONTE CARLO</div>
+      <div class="grid grid-cols-2 gap-3 text-xs">
+        <label class="space-y-1"><div class="text-zinc-500">Starting bankroll</div><input id="m_bank" type="number" value="10000" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
+        <label class="space-y-1"><div class="text-zinc-500">Edge per trade (¢)</div><input id="m_edge" type="number" step="0.5" value="5" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
+        <label class="space-y-1"><div class="text-zinc-500">Avg market price (¢)</div><input id="m_price" type="number" step="1" value="50" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
+        <label class="space-y-1"><div class="text-zinc-500">Kelly fraction</div><input id="m_kf" type="number" step="0.05" value="0.5" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
+        <label class="space-y-1"><div class="text-zinc-500"># trades</div><input id="m_n" type="number" value="200" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
+        <label class="space-y-1"><div class="text-zinc-500"># sims</div><input id="m_sims" type="number" value="500" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
+      </div>
+      <button id="m_run" class="w-full px-3 py-2 rounded bg-fuchsia-500 text-zinc-950 font-bold text-xs">RUN SIMULATION</button>
+      <div class="grid grid-cols-3 gap-3 pt-2">
+        <div><div class="text-[10px] tracking-widest text-zinc-500">MEDIAN END</div><div id="m_med" class="text-xl font-bold num">--</div></div>
+        <div><div class="text-[10px] tracking-widest text-zinc-500">P5 / P95</div><div id="m_band" class="text-xl font-bold num">--</div></div>
+        <div><div class="text-[10px] tracking-widest text-zinc-500">% RUIN</div><div id="m_ruin" class="text-xl font-bold text-red-400 num">--</div></div>
+      </div>
+    </div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4">
+      <div class="text-xs tracking-widest text-zinc-400 mb-2">SIMULATED EQUITY PATHS</div>
+      <canvas id="mcChart" height="260"></canvas>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================== -->
+<!-- PORTFOLIO -->
+<!-- =========================================================== -->
+<section data-pane="portfolio" class="hidden space-y-4">
+  <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4 space-y-3">
+    <div class="flex items-center justify-between">
+      <div class="text-xs tracking-widest text-zinc-400">PORTFOLIO · OPEN POSITIONS</div>
+      <button id="p_new" class="px-3 py-1.5 rounded bg-emerald-500 text-zinc-950 font-bold text-xs">+ NEW POSITION</button>
+    </div>
+    <div class="overflow-x-auto scrollbar">
+      <table class="w-full text-xs">
+        <thead class="text-zinc-500 text-[10px] tracking-widest">
+          <tr class="border-b border-zinc-800">
+            <th class="text-left py-2">MARKET</th><th>SIDE</th><th>ENTRY</th><th>NOW</th><th>SHARES</th><th>STAKE</th><th>MTM P&amp;L</th><th>STATUS</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="p_open" class="num"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4">
+    <div class="text-xs tracking-widest text-zinc-400 mb-2">CLOSED TRADES</div>
+    <div class="overflow-x-auto scrollbar">
+      <table class="w-full text-xs">
+        <thead class="text-zinc-500 text-[10px] tracking-widest">
+          <tr class="border-b border-zinc-800"><th class="text-left py-2">MARKET</th><th>SIDE</th><th>ENTRY</th><th>EXIT</th><th>STAKE</th><th>P&amp;L</th><th>ROI</th><th>REASON</th></tr>
+        </thead>
+        <tbody id="p_closed" class="num"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================== -->
+<!-- ANALYTICS -->
+<!-- =========================================================== -->
+<section data-pane="analytics" class="hidden space-y-4">
+  <div class="grid lg:grid-cols-3 gap-4">
+    <div class="lg:col-span-2 rounded border border-zinc-800 bg-zinc-900/40 p-4">
+      <div class="text-xs tracking-widest text-zinc-400 mb-2">EQUITY &amp; DRAWDOWN</div>
+      <canvas id="anEquity" height="180"></canvas>
+    </div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4">
+      <div class="text-xs tracking-widest text-zinc-400 mb-2">W/L DISTRIBUTION</div>
+      <canvas id="anWL" height="180"></canvas>
+    </div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4">
+      <div class="text-xs tracking-widest text-zinc-400 mb-2">P&amp;L BY MARKET</div>
+      <canvas id="anByMarket" height="180"></canvas>
+    </div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4 lg:col-span-2">
+      <div class="text-xs tracking-widest text-zinc-400 mb-2">EDGE → ROI CALIBRATION</div>
+      <canvas id="anCalib" height="180"></canvas>
+    </div>
+  </div>
+  <div class="grid grid-cols-2 md:grid-cols-6 gap-3 text-xs">
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-3"><div class="text-[10px] text-zinc-500">TRADES</div><div id="anN" class="text-xl font-bold num">0</div></div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-3"><div class="text-[10px] text-zinc-500">WIN RATE</div><div id="anWR" class="text-xl font-bold num">--</div></div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-3"><div class="text-[10px] text-zinc-500">AVG WIN</div><div id="anAW" class="text-xl font-bold text-emerald-400 num">--</div></div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-3"><div class="text-[10px] text-zinc-500">AVG LOSS</div><div id="anAL" class="text-xl font-bold text-red-400 num">--</div></div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-3"><div class="text-[10px] text-zinc-500">EXPECTANCY</div><div id="anExp" class="text-xl font-bold num">--</div></div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-3"><div class="text-[10px] text-zinc-500">MAX DD</div><div id="anDD" class="text-xl font-bold text-amber-400 num">--</div></div>
+  </div>
+</section>
+
+<!-- =========================================================== -->
+<!-- SCANNER -->
+<!-- =========================================================== -->
+<section data-pane="scanner" class="hidden space-y-4">
+  <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4 space-y-3">
+    <div class="flex items-center justify-between">
+      <div class="text-xs tracking-widest text-zinc-400">HIGH-CONVICTION SCANNER</div>
+      <div class="flex gap-2 text-xs">
+        <label class="flex items-center gap-1"><span class="text-zinc-500">min edge ¢</span><input id="sc_minE" type="number" value="5" class="w-16 bg-zinc-950 border border-zinc-800 rounded px-1.5 py-1"/></label>
+        <label class="flex items-center gap-1"><span class="text-zinc-500">min conf %</span><input id="sc_minC" type="number" value="60" class="w-16 bg-zinc-950 border border-zinc-800 rounded px-1.5 py-1"/></label>
+        <button id="sc_add" class="px-3 py-1.5 rounded bg-emerald-500 text-zinc-950 font-bold">+ ADD</button>
+      </div>
+    </div>
+    <div class="overflow-x-auto scrollbar">
+      <table class="w-full text-xs">
+        <thead class="text-zinc-500 text-[10px] tracking-widest">
+          <tr class="border-b border-zinc-800"><th class="text-left py-2">MARKET</th><th>SIDE</th><th>PX</th><th>FAIR</th><th>EDGE</th><th>CONF</th><th>DAYS</th><th>SCORE</th><th>ACT</th></tr>
+        </thead>
+        <tbody id="sc_rows" class="num"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================== -->
+<!-- LIVE -->
+<!-- =========================================================== -->
+<section data-pane="live" class="hidden space-y-4">
+  <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4 space-y-3">
+    <div class="flex items-center gap-2 flex-wrap">
+      <div class="text-xs tracking-widest text-zinc-400">LIVE MARKETS (Polymarket CLOB WebSocket)</div>
+      <span class="text-[10px] text-zinc-500">paste token_id (asset_id) of a market outcome — find via clob.polymarket.com/markets</span>
+      <div class="ml-auto flex gap-2 text-xs">
+        <input id="lv_tok" placeholder="token_id" class="w-80 bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/>
+        <input id="lv_label" placeholder="label (optional)" class="w-40 bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/>
+        <button id="lv_add" class="px-3 py-1.5 rounded bg-emerald-500 text-zinc-950 font-bold">+ SUB</button>
+      </div>
+    </div>
+    <div id="lv_grid" class="grid md:grid-cols-2 xl:grid-cols-3 gap-3"></div>
+  </div>
+</section>
+
+</main>
+
+<footer class="border-t border-zinc-800 mt-8 py-4 text-center text-[10px] text-zinc-500">
+  edge terminal · localStorage only · nothing leaves your browser · prices via wss://ws-subscriptions-clob.polymarket.com/ws/market
+</footer>
+
+<!-- ====================================================================== -->
+<!-- LOGIC -->
+<!-- ====================================================================== -->
+<script>
+'use strict';
+
+/* ------------------------------ STATE ------------------------------ */
+const LS_KEY = 'pm_edge_terminal_v1';
+const DEFAULT_STATE = {
+  bankroll: 10000,
+  factors: [
+    { name: 'Base rate / historical frequency', prob: 0.55, weight: 0.25 },
+    { name: 'Recent news / momentum',           prob: 0.62, weight: 0.20 },
+    { name: 'Polling / forecasting models',     prob: 0.58, weight: 0.25 },
+    { name: 'Market microstructure (book/flow)',prob: 0.60, weight: 0.15 },
+    { name: 'Tail / catalyst risk',             prob: 0.50, weight: 0.15 },
+  ],
+  sizer: { mode: 'aggressive' },
+  scanner: [
+    { market:'EX: Will candidate X win primary?', side:'YES', price:0.42, fair:0.52, conf:70, days:45 },
+    { market:'EX: Fed cuts >50bps in H1',         side:'NO',  price:0.71, fair:0.62, conf:65, days:90 },
+    { market:'EX: Movie Y opens >$80M',           side:'YES', price:0.36, fair:0.48, conf:62, days:14 },
+  ],
+  positions: [
+    // sample open position
+    { id: 'demo1', market:'EX: Will candidate X win primary?', side:'YES', entry:0.42, price:0.47, shares:200, stake:84, opened:Date.now()-86400000*5, status:'open', reason:'10c modeled edge, conf 70' }
+  ],
+  closed: [
+    { id:'c1', market:'EX: Senate seat A flips',   side:'YES', entry:0.30, exit:0.55, shares:300, stake:90,  pnl:75, reason:'Hit +50% partial target', closedAt: Date.now()-86400000*12 },
+    { id:'c2', market:'EX: Bill passes by Mar 1',  side:'NO',  entry:0.40, exit:0.20, shares:250, stake:100, pnl:50, reason:'Thesis confirmed',        closedAt: Date.now()-86400000*8  },
+    { id:'c3', market:'EX: Team Z makes playoffs', side:'YES', entry:0.55, exit:0.33, shares:200, stake:110, pnl:-44,reason:'Thesis broke (-40% stop)',closedAt: Date.now()-86400000*4  },
+  ],
+  live: [] // [{tokenId, label, mid, best_bid, best_ask, last, bids:[], asks:[], trades:[]}]
+};
+
+let state = load();
+function load(){ try { const r = JSON.parse(localStorage.getItem(LS_KEY)); return r ? deepMerge(structuredClone(DEFAULT_STATE), r) : structuredClone(DEFAULT_STATE); } catch { return structuredClone(DEFAULT_STATE);} }
+function save(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+function deepMerge(a,b){ for (const k of Object.keys(b)) { if (Array.isArray(b[k])) a[k]=b[k]; else if (b[k]&&typeof b[k]==='object') a[k]=deepMerge(a[k]||{}, b[k]); else a[k]=b[k]; } return a; }
+
+/* ------------------------------ TABS ------------------------------ */
+const TABS = [
+  ['dashboard','Dashboard'],['analyzer','Analyzer'],['sizer','Sizer'],
+  ['simulator','Simulator'],['portfolio','Portfolio'],['analytics','Analytics'],
+  ['scanner','Scanner'],['live','Live']
+];
+const tabs = document.getElementById('tabs');
+TABS.forEach(([k,l])=>{
+  const b=document.createElement('button');
+  b.dataset.tab=k; b.textContent=l;
+  b.className='px-3 py-1.5 rounded border border-zinc-800 hover:border-zinc-600';
+  b.onclick=()=>showTab(k);
+  tabs.appendChild(b);
+});
+function showTab(k){
+  document.querySelectorAll('[data-pane]').forEach(p=>p.classList.toggle('hidden', p.dataset.pane!==k));
+  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('tab-active', b.dataset.tab===k));
+  if (k==='analytics') renderAnalytics();
+  if (k==='dashboard') renderDashboard();
+  if (k==='portfolio') renderPortfolio();
+  if (k==='scanner')   renderScanner();
+  if (k==='analyzer')  renderAnalyzer();
+  if (k==='live')      renderLive();
+}
+document.querySelectorAll('[data-jump]').forEach(b=>b.onclick=()=>showTab(b.dataset.jump));
+
+/* ------------------------------ HEADER ------------------------------ */
+const bankInput = document.getElementById('bankroll');
+bankInput.value = state.bankroll;
+bankInput.oninput = e=>{ state.bankroll = Number(e.target.value)||0; save(); renderDashboard(); };
+document.getElementById('resetData').onclick = ()=>{
+  if (!confirm('Reset all state? localStorage will be wiped.')) return;
+  localStorage.removeItem(LS_KEY); state = structuredClone(DEFAULT_STATE); save();
+  bankInput.value = state.bankroll; showTab('dashboard');
+};
+
+/* ------------------------------ FORMAT ------------------------------ */
+const $ = id=>document.getElementById(id);
+const usd = v => (v<0?'-':'') + '$' + Math.abs(Math.round(v*100)/100).toLocaleString();
+const pct = v => (v*100).toFixed(1)+'%';
+const cents = v => (v*100).toFixed(1)+'¢';
+const clamp = (v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+
+/* ------------------------------ ANALYZER ------------------------------ */
+function renderAnalyzer(){
+  const c = $('factors'); c.innerHTML='';
+  state.factors.forEach((f,i)=>{
+    const row=document.createElement('div');
+    row.className='grid grid-cols-12 gap-2 items-center text-xs';
+    row.innerHTML = `
+      <input class="col-span-5 bg-zinc-950 border border-zinc-800 rounded px-2 py-1" value="${f.name}" data-i="${i}" data-k="name"/>
+      <div class="col-span-3 flex items-center gap-2">
+        <input type="range" min="0" max="1" step="0.01" value="${f.prob}" data-i="${i}" data-k="prob" class="flex-1"/>
+        <span class="num w-10 text-right" id="fp_${i}">${pct(f.prob)}</span>
+      </div>
+      <div class="col-span-3 flex items-center gap-2">
+        <input type="range" min="0" max="1" step="0.01" value="${f.weight}" data-i="${i}" data-k="weight" class="flex-1"/>
+        <span class="num w-10 text-right" id="fw_${i}">${pct(f.weight)}</span>
+      </div>
+      <button class="col-span-1 text-red-400 hover:text-red-300" data-rm="${i}">×</button>`;
+    c.appendChild(row);
+  });
+  // add row
+  const add = document.createElement('button');
+  add.className='text-xs text-emerald-400 hover:text-emerald-300';
+  add.textContent='+ add factor';
+  add.onclick=()=>{ state.factors.push({name:'New factor', prob:0.5, weight:0.1}); save(); renderAnalyzer(); recalcAnalyzer(); };
+  c.appendChild(add);
+
+  c.oninput = e => {
+    const i = e.target.dataset.i, k = e.target.dataset.k;
+    if (i==null) return;
+    const v = (k==='name') ? e.target.value : Number(e.target.value);
+    state.factors[i][k] = v;
+    if (k==='prob') $('fp_'+i).textContent = pct(v);
+    if (k==='weight') $('fw_'+i).textContent = pct(v);
+    save(); recalcAnalyzer();
+  };
+  c.onclick = e => {
+    const rm = e.target.dataset.rm;
+    if (rm==null) return;
+    state.factors.splice(Number(rm),1); save(); renderAnalyzer(); recalcAnalyzer();
+  };
+
+  ['a_price','a_days','a_side','a_market'].forEach(id=>{
+    const el = $(id); el.oninput = recalcAnalyzer; el.onchange = recalcAnalyzer;
+  });
+  $('a_save').onclick = () => {
+    const o = computeAnalyzer(); if (!o) return alert('Set a market and price first.');
+    state.scanner.unshift({
+      market: $('a_market').value || 'untitled', side: $('a_side').value,
+      price: o.implied, fair: o.fair, conf: Math.round(o.conf*100),
+      days: Number($('a_days').value)||30
+    });
+    save(); showTab('scanner');
+  };
+  $('a_size').onclick = () => {
+    const o = computeAnalyzer(); if (!o) return;
+    $('s_bank').value = state.bankroll;
+    $('s_p').value = o.fair.toFixed(3);
+    $('s_price').value = o.implied.toFixed(2);
+    showTab('sizer'); recalcSizer();
+  };
+  $('a_clear').onclick = () => { ['a_market','a_price','a_days'].forEach(id=>$(id).value=''); recalcAnalyzer(); };
+  recalcAnalyzer();
+}
+function computeAnalyzer(){
+  let priceRaw = Number($('a_price').value);
+  if (!isFinite(priceRaw) || priceRaw<=0) return null;
+  const implied = priceRaw>1 ? priceRaw/100 : priceRaw;
+  const side = $('a_side').value;
+  const wSum = state.factors.reduce((a,f)=>a+f.weight,0) || 1;
+  const fair = state.factors.reduce((a,f)=>a + f.prob*f.weight, 0) / wSum;
+  const sideProb = side==='YES' ? fair : 1-fair;
+  const sideImplied = side==='YES' ? implied : 1-implied;
+  const edge = sideProb - sideImplied;
+  const ev = sideProb*(1-sideImplied) - (1-sideProb)*sideImplied;
+  // confidence from variance of factors (lower variance → higher conf)
+  const m = state.factors.reduce((a,f)=>a + f.prob*f.weight,0)/wSum;
+  const v = state.factors.reduce((a,f)=>a + f.weight*(f.prob-m)**2,0)/wSum;
+  const conf = clamp(1 - v*4, 0.2, 0.99);
+  return { fair, implied, sideProb, sideImplied, edge, ev, conf, side };
+}
+function recalcAnalyzer(){
+  const o = computeAnalyzer();
+  if (!o){ ['o_fair','o_edge','o_implied','o_ev','o_verdict','o_verdictWhy'].forEach(id=>$(id).textContent='--'); return; }
+  $('o_fair').textContent = pct(o.sideProb);
+  $('o_implied').textContent = pct(o.sideImplied);
+  $('o_edge').textContent = (o.edge*100>=0?'+':'') + (o.edge*100).toFixed(1)+'¢';
+  $('o_edge').className = 'text-4xl font-bold num ' + (o.edge>=0.05?'text-emerald-400': o.edge>=0?'text-amber-400':'text-red-400');
+  $('o_ev').textContent  = (o.ev>=0?'+':'') + o.ev.toFixed(3);
+  const eb = $('o_edgeBox');
+  eb.classList.remove('glow-green','glow-red','glow-amber');
+  if (o.edge >= 0.05 && o.conf >= 0.6) eb.classList.add('glow-green');
+  else if (o.edge >= 0) eb.classList.add('glow-amber');
+  else eb.classList.add('glow-red');
+  let v = 'PASS', why = 'edge or confidence too low';
+  if (o.edge >= 0.10 && o.conf >= 0.7) { v='MAX CONVICTION'; why = `+${cents(o.edge)} edge · ${pct(o.conf)} conf`; }
+  else if (o.edge >= 0.07 && o.conf >= 0.65) { v='AGGRESSIVE'; why = `+${cents(o.edge)} edge · ${pct(o.conf)} conf`; }
+  else if (o.edge >= 0.05 && o.conf >= 0.60) { v='BALANCED';   why = `+${cents(o.edge)} edge · ${pct(o.conf)} conf`; }
+  else if (o.edge <= -0.05) { v='FADE / NO TRADE'; why = `market overpriced`; }
+  $('o_verdict').textContent = v;
+  $('o_verdict').className = 'text-xl font-bold num ' + (v.includes('CONVICTION')?'text-emerald-400': v==='AGGRESSIVE'?'text-emerald-300': v==='BALANCED'?'text-amber-300':'text-zinc-400');
+  $('o_verdictWhy').textContent = why;
+}
+
+/* ------------------------------ SIZER ------------------------------ */
+const MODE_K = { balanced: 0.25, aggressive: 0.50, max: 0.75 };
+function renderSizer(){
+  document.querySelectorAll('.modeBtn').forEach(b=>{
+    b.onclick = ()=>{ state.sizer.mode = b.dataset.mode; save(); paintMode(); recalcSizer(); };
+  });
+  paintMode();
+  ['s_bank','s_p','s_price','s_cap'].forEach(id=>{
+    $(id).oninput = recalcSizer;
+  });
+  $('s_open').onclick = openPositionFromSizer;
+  if (!$('s_bank').value) $('s_bank').value = state.bankroll;
+  recalcSizer();
+}
+function paintMode(){
+  document.querySelectorAll('.modeBtn').forEach(b=>{
+    b.classList.toggle('tab-active', b.dataset.mode === state.sizer.mode);
+  });
+}
+function recalcSizer(){
+  const bank = Number($('s_bank').value)||0;
+  let p = Number($('s_p').value); if (p>1) p/=100;
+  let priceRaw = Number($('s_price').value); const px = priceRaw>1 ? priceRaw/100 : priceRaw;
+  const cap = Number($('s_cap').value)/100;
+  if (!bank || !p || !px) { ['s_k','s_kFrac','s_stake','s_shares','s_loss','s_win','s_ev'].forEach(id=>$(id).textContent='--'); return; }
+  const b = (1-px)/px;            // payoff odds for buying at px (binary)
+  const q = 1-p;
+  let kelly = (b*p - q)/b;
+  kelly = clamp(kelly, -1, 1);
+  const frac = MODE_K[state.sizer.mode];
+  const used = Math.max(0, kelly*frac);
+  const stakePct = Math.min(used, cap);
+  const stake = bank * stakePct;
+  const shares = px>0 ? stake/px : 0;
+  const maxLoss = stake;
+  const maxWin = shares * (1-px);
+  const ev = shares * (p*(1-px) - (1-p)*px);
+  $('s_k').textContent = (kelly*100).toFixed(1)+'%';
+  $('s_kFrac').textContent = (frac*100).toFixed(0)+'% Kelly';
+  $('s_stake').textContent = usd(stake);
+  $('s_shares').textContent = Math.round(shares).toLocaleString();
+  $('s_loss').textContent = usd(-maxLoss);
+  $('s_win').textContent  = usd(maxWin);
+  $('s_ev').textContent   = (ev>=0?'+':'') + usd(ev);
+  $('s_ev').className = 'text-2xl font-bold num ' + (ev>=0?'text-emerald-400':'text-red-400');
+}
+function openPositionFromSizer(){
+  const market = prompt('Market label?', 'New position') || 'New position';
+  const side = (prompt('Side (YES/NO)?','YES')||'YES').toUpperCase();
+  const reason = prompt('Reason / thesis?','') || '';
+  let px = Number($('s_price').value); if (px>1) px/=100;
+  const shares = Number($('s_shares').textContent.replace(/[^0-9.-]/g,''));
+  const stake  = Number($('s_stake').textContent.replace(/[^0-9.-]/g,''));
+  if (!px || !shares) return alert('Set fair p and price first.');
+  state.positions.unshift({
+    id: 'p_'+Date.now(), market, side, entry: px, price: px, shares, stake,
+    opened: Date.now(), status:'open', reason
+  });
+  save(); showTab('portfolio');
+}
+
+/* ------------------------------ SIMULATOR ------------------------------ */
+let mcChart;
+function runMC(){
+  const bank0 = Number($('m_bank').value)||10000;
+  const edge  = Number($('m_edge').value)/100;
+  const priceM = clamp(Number($('m_price').value)/100, 0.02, 0.98);
+  const kf    = Number($('m_kf').value);
+  const N     = Number($('m_n').value)||100;
+  const S     = Math.min(Number($('m_sims').value)||200, 2000);
+  const p = clamp(priceM + edge, 0.01, 0.99);
+  const b = (1-priceM)/priceM;
+  const kelly = clamp((b*p - (1-p))/b, 0, 1) * kf;
+  const paths = [];
+  let ruin = 0;
+  for (let s=0;s<S;s++){
+    let bal = bank0; const path=[bal];
+    let busted=false;
+    for (let t=0;t<N;t++){
+      const stake = bal*kelly;
+      const win = Math.random() < p;
+      bal += win ? stake*(b) : -stake;
+      if (bal < bank0*0.05) { busted=true; bal=0; }
+      path.push(bal);
+      if (busted) break;
+    }
+    if (busted) ruin++;
+    while (path.length <= N) path.push(path[path.length-1]||0);
+    paths.push(path);
+  }
+  const ends = paths.map(p=>p[p.length-1]).sort((a,b)=>a-b);
+  const med = ends[Math.floor(ends.length/2)];
+  const p5 = ends[Math.floor(ends.length*0.05)];
+  const p95= ends[Math.floor(ends.length*0.95)];
+  $('m_med').textContent  = usd(med);
+  $('m_band').textContent = usd(p5)+' / '+usd(p95);
+  $('m_ruin').textContent = (ruin/S*100).toFixed(1)+'%';
+  const labels = Array.from({length:N+1},(_,i)=>i);
+  const sample = paths.slice(0, 50);
+  if (mcChart) mcChart.destroy();
+  mcChart = new Chart($('mcChart'), {
+    type:'line',
+    data:{ labels, datasets: sample.map((p,i)=>({ data:p, borderWidth:1, borderColor: 'rgba(34,197,94,0.15)', pointRadius:0 })).concat([
+      { data: percentilePath(paths,0.5),  borderColor:'#22c55e', borderWidth:2, pointRadius:0, label:'P50' },
+      { data: percentilePath(paths,0.05), borderColor:'#ef4444', borderWidth:1.5, borderDash:[4,4], pointRadius:0, label:'P5' },
+      { data: percentilePath(paths,0.95), borderColor:'#06b6d4', borderWidth:1.5, borderDash:[4,4], pointRadius:0, label:'P95' },
+    ])},
+    options:{ animation:false, plugins:{legend:{display:false}}, scales:{ x:{display:false}, y:{ticks:{color:'#a1a1aa'},grid:{color:'#27272a'}}}}
+  });
+}
+function percentilePath(paths, q){
+  const N = paths[0].length, out=new Array(N).fill(0);
+  for (let t=0;t<N;t++){
+    const col = paths.map(p=>p[t]).sort((a,b)=>a-b);
+    out[t] = col[Math.floor(col.length*q)];
+  }
+  return out;
+}
+$('m_run').onclick = runMC;
+
+/* ------------------------------ PORTFOLIO ------------------------------ */
+function renderPortfolio(){
+  const ob = $('p_open'); ob.innerHTML='';
+  state.positions.forEach(p=>{
+    const mtm = (p.price - p.entry) * p.shares * (p.side==='YES'?1:-1);
+    // Note: for NO side, p&l uses (entry - price) since holding NO ↔ short YES on a 1-unit binary
+    const pnl = p.side==='YES' ? (p.price - p.entry)*p.shares : (p.entry - p.price)*p.shares;
+    const roi = p.stake ? pnl/p.stake : 0;
+    const tr = document.createElement('tr');
+    tr.className='border-b border-zinc-800/60 hover:bg-zinc-900/60';
+    tr.innerHTML = `
+      <td class="py-2"><div class="font-semibold">${esc(p.market)}</div><div class="text-[10px] text-zinc-500">${new Date(p.opened).toLocaleDateString()} · ${esc(p.reason||'')}</div></td>
+      <td class="text-center">${p.side}</td>
+      <td class="text-center">${cents(p.entry)}</td>
+      <td class="text-center"><input data-id="${p.id}" data-k="price" type="number" step="0.01" value="${p.price.toFixed(2)}" class="w-16 bg-zinc-950 border border-zinc-800 rounded px-1 py-0.5 text-center"/></td>
+      <td class="text-center">${Math.round(p.shares)}</td>
+      <td class="text-center">${usd(p.stake)}</td>
+      <td class="text-center ${pnl>=0?'text-emerald-400':'text-red-400'}">${usd(pnl)}<div class="text-[10px] text-zinc-500">${(roi*100).toFixed(1)}%</div></td>
+      <td class="text-center">
+        <button class="text-amber-400 hover:text-amber-300" data-action="trim" data-id="${p.id}">trim</button>
+      </td>
+      <td class="text-right"><button class="text-red-400 hover:text-red-300" data-action="close" data-id="${p.id}">close</button></td>`;
+    ob.appendChild(tr);
+  });
+  ob.oninput = e => {
+    const id = e.target.dataset.id, k = e.target.dataset.k;
+    if (!id) return;
+    const p = state.positions.find(x=>x.id===id); if (!p) return;
+    p[k] = Number(e.target.value)||0; save(); renderPortfolio(); renderDashboard();
+  };
+  ob.onclick = e => {
+    const a = e.target.dataset.action, id = e.target.dataset.id;
+    if (!a) return;
+    const p = state.positions.find(x=>x.id===id); if (!p) return;
+    if (a==='close'){
+      const reason = prompt('Close reason?','Manual close') || '';
+      const pnl = p.side==='YES' ? (p.price - p.entry)*p.shares : (p.entry - p.price)*p.shares;
+      state.closed.unshift({ id:'c_'+Date.now(), market:p.market, side:p.side, entry:p.entry, exit:p.price, shares:p.shares, stake:p.stake, pnl, reason, closedAt: Date.now() });
+      state.positions = state.positions.filter(x=>x.id!==id);
+      save(); renderPortfolio(); renderDashboard();
+    }
+    if (a==='trim'){
+      const frac = Number(prompt('Trim fraction (0-1)?','0.5'))||0;
+      if (frac<=0||frac>=1) return;
+      const trimmedShares = p.shares*frac;
+      const trimmedStake  = p.stake*frac;
+      const pnl = p.side==='YES' ? (p.price - p.entry)*trimmedShares : (p.entry - p.price)*trimmedShares;
+      state.closed.unshift({ id:'c_'+Date.now(), market:p.market+' (trim)', side:p.side, entry:p.entry, exit:p.price, shares:trimmedShares, stake:trimmedStake, pnl, reason:'Trim '+(frac*100).toFixed(0)+'%', closedAt: Date.now() });
+      p.shares -= trimmedShares; p.stake -= trimmedStake;
+      save(); renderPortfolio(); renderDashboard();
+    }
+  };
+  const cb = $('p_closed'); cb.innerHTML='';
+  state.closed.forEach(c=>{
+    const roi = c.stake ? c.pnl/c.stake : 0;
+    const tr=document.createElement('tr');
+    tr.className='border-b border-zinc-800/60';
+    tr.innerHTML = `
+      <td class="py-2">${esc(c.market)}<div class="text-[10px] text-zinc-500">${new Date(c.closedAt).toLocaleDateString()}</div></td>
+      <td class="text-center">${c.side}</td>
+      <td class="text-center">${cents(c.entry)}</td>
+      <td class="text-center">${cents(c.exit)}</td>
+      <td class="text-center">${usd(c.stake)}</td>
+      <td class="text-center ${c.pnl>=0?'text-emerald-400':'text-red-400'}">${usd(c.pnl)}</td>
+      <td class="text-center ${roi>=0?'text-emerald-400':'text-red-400'}">${(roi*100).toFixed(1)}%</td>
+      <td class="text-[10px] text-zinc-400">${esc(c.reason||'')}</td>`;
+    cb.appendChild(tr);
+  });
+}
+$('p_new').onclick = () => {
+  $('s_bank').value = state.bankroll;
+  if (!$('s_p').value) $('s_p').value = 0.55;
+  if (!$('s_price').value) $('s_price').value = 0.5;
+  showTab('sizer');
+};
+
+/* ------------------------------ DASHBOARD ------------------------------ */
+let equityChart;
+function renderDashboard(){
+  $('kpiBank').textContent = usd(state.bankroll);
+  const risk = state.positions.reduce((a,p)=>a+p.stake,0);
+  $('kpiRisk').textContent = usd(risk);
+  const realized = state.closed.reduce((a,c)=>a+c.pnl,0);
+  $('kpiPnl').textContent = (realized>=0?'+':'') + usd(realized);
+  $('kpiPnl').className = 'text-2xl font-bold num ' + (realized>=0?'text-emerald-400':'text-red-400');
+  const wins = state.closed.filter(c=>c.pnl>0).length;
+  const wr = state.closed.length ? wins/state.closed.length : 0;
+  const ev = state.closed.length ? realized/state.closed.length : 0;
+  $('kpiWin').textContent = state.closed.length ? `${(wr*100).toFixed(0)}% · ${usd(ev)}/trd` : '--';
+  // Recent
+  const rec = $('recentTrades'); rec.innerHTML='';
+  state.closed.slice(0,8).forEach(c=>{
+    const li = document.createElement('div');
+    li.className='flex items-center justify-between border-b border-zinc-800/60 py-1';
+    li.innerHTML = `<div class="truncate pr-2"><div class="truncate">${esc(c.market)}</div><div class="text-[10px] text-zinc-500">${c.side} · ${cents(c.entry)}→${cents(c.exit)}</div></div><div class="${c.pnl>=0?'text-emerald-400':'text-red-400'} font-bold">${usd(c.pnl)}</div>`;
+    rec.appendChild(li);
+  });
+  if (!state.closed.length) rec.innerHTML = '<div class="text-zinc-500 text-xs">no closed trades yet</div>';
+  // Equity curve
+  const ordered = [...state.closed].sort((a,b)=>a.closedAt-b.closedAt);
+  let cum = 0; const eq = ordered.map(c=>{ cum += c.pnl; return cum; });
+  const labels = ordered.map(c=>new Date(c.closedAt).toLocaleDateString());
+  if (equityChart) equityChart.destroy();
+  equityChart = new Chart($('equityChart'), {
+    type:'line', data:{ labels, datasets:[{ data:eq, borderColor:'#22c55e', backgroundColor:'rgba(34,197,94,0.1)', fill:true, tension:0.25, pointRadius:0, borderWidth:2 }] },
+    options:{ animation:false, plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:'#71717a',maxRotation:0,autoSkip:true}}, y:{ticks:{color:'#a1a1aa'},grid:{color:'#27272a'}}}}
+  });
+}
+
+/* ------------------------------ ANALYTICS ------------------------------ */
+let anE, anW, anM, anC;
+function renderAnalytics(){
+  const closed = [...state.closed].sort((a,b)=>a.closedAt-b.closedAt);
+  let cum=0; const eq=closed.map(c=>{ cum+=c.pnl; return cum; });
+  let peak=-Infinity, dd=[]; eq.forEach(v=>{ peak=Math.max(peak,v); dd.push(v-peak); });
+  const labels = closed.map(c=>new Date(c.closedAt).toLocaleDateString());
+  [anE,anW,anM,anC].forEach(c=>c&&c.destroy());
+  anE = new Chart($('anEquity'), {
+    type:'line', data:{ labels, datasets:[
+      { data:eq, borderColor:'#22c55e', borderWidth:2, pointRadius:0, label:'equity', fill:false },
+      { data:dd, borderColor:'#f59e0b', backgroundColor:'rgba(245,158,11,0.12)', fill:true, borderWidth:1, pointRadius:0, label:'drawdown' }
+    ]},
+    options:{ animation:false, plugins:{legend:{labels:{color:'#a1a1aa'}}}, scales:{x:{ticks:{color:'#71717a',autoSkip:true,maxRotation:0}}, y:{ticks:{color:'#a1a1aa'},grid:{color:'#27272a'}}}}
+  });
+  const wins = closed.filter(c=>c.pnl>0), losses = closed.filter(c=>c.pnl<=0);
+  anW = new Chart($('anWL'), {
+    type:'doughnut',
+    data:{ labels:['Wins','Losses'], datasets:[{ data:[wins.length, losses.length], backgroundColor:['#22c55e','#ef4444'], borderColor:'#0a0a0b' }]},
+    options:{ animation:false, plugins:{legend:{labels:{color:'#a1a1aa'}}}, cutout:'60%'}
+  });
+  const byM = {}; closed.forEach(c=>{ byM[c.market]=(byM[c.market]||0)+c.pnl; });
+  anM = new Chart($('anByMarket'), {
+    type:'bar',
+    data:{ labels:Object.keys(byM), datasets:[{ data:Object.values(byM), backgroundColor: Object.values(byM).map(v=>v>=0?'#22c55e':'#ef4444') }]},
+    options:{ animation:false, indexAxis:'y', plugins:{legend:{display:false}}, scales:{x:{ticks:{color:'#a1a1aa'},grid:{color:'#27272a'}},y:{ticks:{color:'#a1a1aa'}}}}
+  });
+  const calib = closed.map(c=>{
+    const edgeC = (c.exit - c.entry) * (c.side==='YES'?1:-1); // realized edge sign
+    const roi = c.stake ? c.pnl/c.stake : 0;
+    return { x: edgeC*100, y: roi*100 };
+  });
+  anC = new Chart($('anCalib'), {
+    type:'scatter',
+    data:{ datasets:[{ data:calib, backgroundColor:'#06b6d4' }]},
+    options:{ animation:false, plugins:{legend:{display:false}}, scales:{ x:{title:{display:true,text:'realized edge (¢)',color:'#a1a1aa'},ticks:{color:'#a1a1aa'},grid:{color:'#27272a'}}, y:{title:{display:true,text:'ROI %',color:'#a1a1aa'},ticks:{color:'#a1a1aa'},grid:{color:'#27272a'}}}}
+  });
+  // KPIs
+  $('anN').textContent = closed.length;
+  $('anWR').textContent = closed.length ? (wins.length/closed.length*100).toFixed(0)+'%' : '--';
+  const avgWin = wins.length ? wins.reduce((a,c)=>a+c.pnl,0)/wins.length : 0;
+  const avgLoss = losses.length ? losses.reduce((a,c)=>a+c.pnl,0)/losses.length : 0;
+  $('anAW').textContent = wins.length ? usd(avgWin) : '--';
+  $('anAL').textContent = losses.length ? usd(avgLoss) : '--';
+  const exp = closed.length ? closed.reduce((a,c)=>a+c.pnl,0)/closed.length : 0;
+  $('anExp').textContent = closed.length ? usd(exp) : '--';
+  $('anDD').textContent = dd.length ? usd(Math.min(...dd)) : '--';
+}
+
+/* ------------------------------ SCANNER ------------------------------ */
+function renderScanner(){
+  const rows = $('sc_rows'); rows.innerHTML='';
+  const minE = Number($('sc_minE').value)/100;
+  const minC = Number($('sc_minC').value);
+  state.scanner
+    .map((r,i)=>({...r, _i:i, edge: (r.side==='YES' ? r.fair-r.price : (1-r.fair)-(1-r.price)) }))
+    .map(r=>({...r, score: r.edge*100 * (r.conf/100) * (1 - clamp(r.days/365,0,0.7)) }))
+    .sort((a,b)=>b.score-a.score)
+    .forEach(r=>{
+      const ok = (r.edge >= minE) && (r.conf >= minC);
+      const tr = document.createElement('tr');
+      tr.className='border-b border-zinc-800/60 ' + (ok?'bg-emerald-500/5':'');
+      tr.innerHTML = `
+        <td class="py-1">${esc(r.market)}</td>
+        <td class="text-center">${r.side}</td>
+        <td class="text-center">${cents(r.price)}</td>
+        <td class="text-center">${cents(r.fair)}</td>
+        <td class="text-center ${r.edge>=0.05?'text-emerald-400':r.edge>=0?'text-amber-400':'text-red-400'}">${(r.edge*100>=0?'+':'')+(r.edge*100).toFixed(1)}¢</td>
+        <td class="text-center">${r.conf}%</td>
+        <td class="text-center">${r.days}</td>
+        <td class="text-center font-bold ${ok?'text-emerald-400':'text-zinc-400'}">${r.score.toFixed(2)}</td>
+        <td class="text-center"><button class="text-cyan-300" data-sc="${r._i}">→ analyze</button> <button class="text-red-400 ml-2" data-rm="${r._i}">×</button></td>`;
+      rows.appendChild(tr);
+    });
+  rows.onclick = e => {
+    const sc = e.target.dataset.sc, rm = e.target.dataset.rm;
+    if (sc!=null){
+      const r = state.scanner[Number(sc)];
+      $('a_market').value = r.market; $('a_side').value = r.side; $('a_price').value = r.price; $('a_days').value = r.days;
+      showTab('analyzer');
+    }
+    if (rm!=null){ state.scanner.splice(Number(rm),1); save(); renderScanner(); }
+  };
+  $('sc_minE').oninput = renderScanner; $('sc_minC').oninput = renderScanner;
+}
+$('sc_add').onclick = () => {
+  const market = prompt('Market label?','New scanner item') || 'New';
+  const side = (prompt('Side?','YES')||'YES').toUpperCase();
+  const price = Number(prompt('Market price (0-1 or 0-100¢)?','0.45')) || 0.5;
+  const fair = Number(prompt('Fair p (0-1)?','0.55')) || 0.5;
+  const conf = Number(prompt('Confidence %?','65')) || 60;
+  const days = Number(prompt('Days to resolution?','30')) || 30;
+  state.scanner.unshift({ market, side, price: price>1?price/100:price, fair, conf, days });
+  save(); renderScanner();
+};
+
+/* ------------------------------ LIVE WS ------------------------------ */
+const WS_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws/market';
+let ws = null;
+let wantsConnect = false;
+let reconnectTimer = null;
+function setWsStatus(s, msg){
+  const dot = $('wsDot'), lbl=$('wsLabel'), btn=$('wsToggle');
+  dot.className = 'pulse-dot ' + (s==='live'?'live': s==='err'?'err':'idle');
+  lbl.textContent = 'WS: ' + (msg||s);
+  btn.textContent = wantsConnect ? 'disconnect' : 'connect';
+}
+$('wsToggle').onclick = () => {
+  if (wantsConnect){ wantsConnect=false; if (ws){ try { ws.close(); } catch{} } setWsStatus('idle','idle'); }
+  else { wantsConnect=true; connectWs(); }
+};
+function connectWs(){
+  if (!wantsConnect) return;
+  try {
+    setWsStatus('idle','connecting…');
+    ws = new WebSocket(WS_URL);
+    ws.onopen = () => {
+      setWsStatus('live','live');
+      const ids = state.live.map(x=>x.tokenId).filter(Boolean);
+      if (ids.length) ws.send(JSON.stringify({ type:'Market', assets_ids: ids }));
+    };
+    ws.onmessage = ev => {
+      try {
+        const data = JSON.parse(ev.data);
+        const arr = Array.isArray(data) ? data : [data];
+        arr.forEach(handleWsMsg);
+        renderLive(false);
+      } catch{}
+    };
+    ws.onerror = () => setWsStatus('err','error');
+    ws.onclose = () => {
+      setWsStatus('err','closed');
+      if (wantsConnect){ clearTimeout(reconnectTimer); reconnectTimer = setTimeout(connectWs, 2000); }
+    };
+  } catch (e){ setWsStatus('err','fail'); }
+}
+function handleWsMsg(m){
+  if (!m || !m.event_type) return;
+  const id = m.asset_id || m.market;
+  const sub = state.live.find(x=>x.tokenId===id);
+  if (!sub) return;
+  if (m.event_type === 'book'){
+    sub.bids = (m.bids||[]).map(x=>({price:Number(x.price), size:Number(x.size)})).sort((a,b)=>b.price-a.price);
+    sub.asks = (m.asks||[]).map(x=>({price:Number(x.price), size:Number(x.size)})).sort((a,b)=>a.price-b.price);
+    if (sub.bids[0]) sub.best_bid = sub.bids[0].price;
+    if (sub.asks[0]) sub.best_ask = sub.asks[0].price;
+    if (sub.best_bid && sub.best_ask) sub.mid = (sub.best_bid+sub.best_ask)/2;
+  } else if (m.event_type === 'price_change'){
+    (m.changes||[]).forEach(ch=>{
+      const side = ch.side==='BUY'?'bids':'asks';
+      const arr = sub[side] || (sub[side]=[]);
+      const price=Number(ch.price), size=Number(ch.size);
+      const idx = arr.findIndex(x=>x.price===price);
+      if (size===0){ if (idx>=0) arr.splice(idx,1); }
+      else { if (idx>=0) arr[idx].size=size; else arr.push({price,size}); }
+      arr.sort((a,b)=> side==='bids' ? b.price-a.price : a.price-b.price);
+    });
+    if (sub.bids?.[0]) sub.best_bid = sub.bids[0].price;
+    if (sub.asks?.[0]) sub.best_ask = sub.asks[0].price;
+    if (sub.best_bid && sub.best_ask) sub.mid = (sub.best_bid+sub.best_ask)/2;
+  } else if (m.event_type === 'last_trade_price'){
+    sub.last = Number(m.price);
+    sub.trades = sub.trades || [];
+    sub.trades.unshift({ price:Number(m.price), size:Number(m.size||0), side:m.side, t:Date.now() });
+    sub.trades = sub.trades.slice(0,40);
+  }
+  save();
+}
+function renderLive(rebuild=true){
+  const grid = $('lv_grid');
+  if (!grid) return;
+  // ensure cards exist
+  if (rebuild){
+    grid.innerHTML='';
+    state.live.forEach((s,i)=>{
+      const card = document.createElement('div');
+      card.className='rounded border border-zinc-800 bg-zinc-900/50 p-3 space-y-2';
+      card.id = 'lvcard_'+i;
+      card.innerHTML = liveCardHtml(s,i);
+      grid.appendChild(card);
+    });
+    if (!state.live.length){
+      grid.innerHTML = '<div class="text-zinc-500 text-xs col-span-3">no subscriptions yet — paste a token_id above and click +SUB. Connect the WS in the header to begin streaming.</div>';
+    }
+  } else {
+    state.live.forEach((s,i)=>{
+      const card = document.getElementById('lvcard_'+i);
+      if (card) card.innerHTML = liveCardHtml(s,i);
+    });
+  }
+}
+function liveCardHtml(s, i){
+  const bidsTop = (s.bids||[]).slice(0,8);
+  const asksTop = (s.asks||[]).slice(0,8).reverse();
+  const totalBid = (s.bids||[]).reduce((a,x)=>a+x.size,0);
+  const totalAsk = (s.asks||[]).reduce((a,x)=>a+x.size,0);
+  const imb = (totalBid+totalAsk) ? (totalBid-totalAsk)/(totalBid+totalAsk) : 0;
+  const maxSz = Math.max(...bidsTop.map(b=>b.size),...asksTop.map(a=>a.size), 1);
+  // volume profile bins
+  const profile = volumeProfile(s.trades||[]);
+  return `
+    <div class="flex items-center justify-between">
+      <div class="min-w-0">
+        <div class="text-sm font-bold truncate">${esc(s.label||'unnamed')}</div>
+        <div class="text-[10px] text-zinc-500 truncate">${esc(s.tokenId)}</div>
+      </div>
+      <button class="text-red-400 text-xs" data-lvrm="${i}">×</button>
+    </div>
+    <div class="grid grid-cols-4 gap-2 text-xs">
+      <div><div class="text-[10px] text-zinc-500">BID</div><div class="text-emerald-400 num">${s.best_bid?cents(s.best_bid):'--'}</div></div>
+      <div><div class="text-[10px] text-zinc-500">ASK</div><div class="text-red-400 num">${s.best_ask?cents(s.best_ask):'--'}</div></div>
+      <div><div class="text-[10px] text-zinc-500">MID</div><div class="text-cyan-300 num">${s.mid?cents(s.mid):'--'}</div></div>
+      <div><div class="text-[10px] text-zinc-500">LAST</div><div class="num">${s.last?cents(s.last):'--'}</div></div>
+    </div>
+    <div>
+      <div class="flex items-center justify-between text-[10px] text-zinc-500"><div>DEPTH (top 8)</div><div>imbalance <span class="${imb>=0?'text-emerald-400':'text-red-400'}">${(imb*100).toFixed(0)}%</span></div></div>
+      <div class="rounded bg-zinc-950 border border-zinc-800 mt-1 overflow-hidden">
+        ${asksTop.map(a=>`<div class="ladder-row" style="background:linear-gradient(90deg, transparent ${100-Math.round(a.size/maxSz*100)}%, rgba(239,68,68,0.25) 0)"><div class="text-zinc-500">${a.size.toFixed(0)}</div><div class="text-center text-red-400 num">${cents(a.price)}</div><div></div></div>`).join('')}
+        <div class="ladder-row bg-zinc-900 border-y border-zinc-800"><div></div><div class="text-center text-cyan-300 num">${s.mid?cents(s.mid):'--'}</div><div></div></div>
+        ${bidsTop.map(b=>`<div class="ladder-row" style="background:linear-gradient(90deg, rgba(34,197,94,0.25) ${Math.round(b.size/maxSz*100)}%, transparent 0)"><div></div><div class="text-center text-emerald-400 num">${cents(b.price)}</div><div class="text-right text-zinc-500">${b.size.toFixed(0)}</div></div>`).join('')}
+      </div>
+    </div>
+    <div>
+      <div class="flex items-center justify-between text-[10px] text-zinc-500"><div>VOLUME PROFILE</div><div>POC <span class="text-amber-400">${profile.poc?cents(profile.poc):'--'}</span></div></div>
+      <div class="rounded bg-zinc-950 border border-zinc-800 mt-1 p-1 grid grid-cols-10 gap-px">
+        ${profile.cells.map(c=>`<div class="heatcell rounded text-center" style="background:rgba(245,158,11,${c.intensity});padding:2px 0;color:${c.intensity>0.4?'#0a0a0b':'#a1a1aa'}">${(c.price*100).toFixed(0)}</div>`).join('')}
+      </div>
+      <div class="text-[10px] text-zinc-500 mt-1">${(s.trades||[]).length} trades · POC = highest-volume price bin</div>
+    </div>`;
+}
+function volumeProfile(trades){
+  const cells = Array.from({length:10}, (_,i)=>({ price: (i+0.5)/10, vol:0, intensity:0 }));
+  trades.forEach(t=>{
+    const idx = clamp(Math.floor(t.price*10), 0, 9);
+    cells[idx].vol += t.size || 1;
+  });
+  const max = Math.max(...cells.map(c=>c.vol), 1);
+  cells.forEach(c=>c.intensity = Math.min(1, c.vol/max));
+  const poc = cells.reduce((a,b)=>b.vol>a.vol?b:a, cells[0]).price;
+  return { cells, poc: poc };
+}
+$('lv_add').onclick = () => {
+  const tok = $('lv_tok').value.trim();
+  const lbl = $('lv_label').value.trim() || tok.slice(0,12);
+  if (!tok) return;
+  state.live.push({ tokenId: tok, label: lbl, bids:[], asks:[], trades:[] });
+  save(); renderLive(true);
+  // try REST snapshot first
+  fetch('https://clob.polymarket.com/book?token_id='+encodeURIComponent(tok))
+    .then(r=>r.ok?r.json():null).then(d=>{
+      if (!d) return;
+      const sub = state.live.find(x=>x.tokenId===tok);
+      if (!sub) return;
+      sub.bids = (d.bids||[]).map(x=>({price:Number(x.price),size:Number(x.size)})).sort((a,b)=>b.price-a.price);
+      sub.asks = (d.asks||[]).map(x=>({price:Number(x.price),size:Number(x.size)})).sort((a,b)=>a.price-b.price);
+      if (sub.bids[0]) sub.best_bid=sub.bids[0].price;
+      if (sub.asks[0]) sub.best_ask=sub.asks[0].price;
+      if (sub.best_bid&&sub.best_ask) sub.mid=(sub.best_bid+sub.best_ask)/2;
+      save(); renderLive(false);
+    }).catch(()=>{});
+  if (ws && ws.readyState===1) ws.send(JSON.stringify({ type:'Market', assets_ids: state.live.map(x=>x.tokenId)}));
+  $('lv_tok').value=''; $('lv_label').value='';
+};
+document.addEventListener('click', e => {
+  const rm = e.target.dataset.lvrm;
+  if (rm==null) return;
+  state.live.splice(Number(rm),1); save(); renderLive(true);
+});
+
+/* ------------------------------ UTIL ------------------------------ */
+function esc(s){ return String(s??'').replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+
+/* ------------------------------ INIT ------------------------------ */
+showTab('dashboard');
+renderDashboard();
+renderAnalyzer();
+renderSizer();
+renderPortfolio();
+renderScanner();
+renderLive(true);
+setWsStatus('idle','idle');
+
+// keep open positions price-synced from live subs (if labels match by tokenId via reason field "tok:<id>")
+setInterval(()=>{
+  let dirty=false;
+  state.positions.forEach(p=>{
+    const m = /tok:([A-Za-z0-9]+)/.exec(p.reason||'');
+    if (!m) return;
+    const sub = state.live.find(x=>x.tokenId===m[1]);
+    if (sub && sub.mid){ p.price = sub.mid; dirty=true; }
+  });
+  if (dirty){ save(); renderPortfolio(); renderDashboard(); }
+}, 4000);
+
+</script>
+</body>
+</html>
