@@ -47,3 +47,34 @@ crash; debounce is an optimization, deferred); ambiguous NO-side "FAIR PROBABILI
 Status: real fixes shipped. Next cycle should rotate to fresh surfaces — suggest: Chart.js
 lifecycle/leaks, tab-switch render side-effects, input validation on Analyzer/Sizer number
 fields, and full keyboard/focus pass.
+
+---
+
+## Cycle 2 — 2026-05-29 (FEATURE build, user-requested: "make it more powerful / make money")
+Shipped 20 profit-oriented features into index.html (all external fetches degrade to an
+honest empty/unavailable state — never fabricate). Browser-smoke-tested via preview MCP
+(all render paths ok, no console errors; gamma API + clob book fetches confirmed working
+live from the browser — free-arb detector validated against real order books).
+
+Data/alpha: #1 live market discovery (Gamma API) + analyzer autocomplete datalist;
+#2 discovery screener (top-by-volume, filterable, → analyze); #3 cross-venue reference
+price column + arb gap in Scanner; #4 FREE-ARB detector (YES-ask+NO-ask<\$1 / bids>\$1)
+against live clob books; #5 catalyst date + countdown on positions.
+Microstructure (Live cards): #6 spread/spread%; #7 slippage/fill-price probe (walk ladder);
+#8 liquidity within ±band; #9 imbalance trend sparkline; #10 microprice; #11 VWAP + buy-flow
+% + trades/min.
+Risk (Sizer/Dashboard): #12 cluster exposure bars + 25% cap warning; #13 portfolio heat
+gauge + budget; #14 concurrent-bet Kelly haircut (1/√n); #15 fee+slippage-adjusted NET EV
+(blocks negative-EV trades); #16 theta/days-to-catalyst.
+Analytics: #17 probability calibration curve + Brier score (resolved trades only, honest
+coverage note); #18 Sharpe/Sortino/profit-factor/exp-per-day/lose-streak/CAGR;
+#19 edge→ROI least-squares fit + R²; #20 bootstrap projection from YOUR real closed-trade
+ROIs (needs ≥5 trades, else honest "need more data").
+
+State additions: settings{feeBps,riskBudgetPct,probeShares,slipBand}; positions/closed gain
+pEntry/cluster/tokenId/catalyst/outcome (deepMerge defaults old localStorage safely).
+Correctness bonus: Analyzer→Sizer handoff now passes SIDE-adjusted prob/price (was passing
+YES values for NO bets).
+
+Gate: node --check on extracted inline JS = PASS. Preview smoke test = PASS.
+Commit: cycle 2. Deploy: see deploy log below.

@@ -87,6 +87,12 @@
     <div class="rounded border border-zinc-800 bg-zinc-900/50 p-3"><div class="text-[10px] text-zinc-500 tracking-widest">REALIZED P&amp;L</div><div id="kpiPnl" class="text-2xl font-bold num">$0</div></div>
     <div class="rounded border border-zinc-800 bg-zinc-900/50 p-3"><div class="text-[10px] text-zinc-500 tracking-widest">WIN RATE / EV</div><div id="kpiWin" class="text-2xl font-bold num">--</div></div>
   </div>
+  <!-- CYCLE 2 [FEATURE] (2026-05-29): #13 portfolio heat + #12 cluster concentration -->
+  <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4 space-y-2">
+    <div class="flex items-center justify-between text-xs"><div class="tracking-widest text-zinc-400">PORTFOLIO HEAT</div><div id="heatTxt" class="text-zinc-400 num">--</div></div>
+    <div class="h-2 rounded bg-zinc-800 overflow-hidden"><div id="heatBar" class="h-full bg-emerald-500" style="width:0%"></div></div>
+    <div id="clusterBars" class="space-y-1 text-[10px] text-zinc-400"></div>
+  </div>
   <div class="grid lg:grid-cols-3 gap-4">
     <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4 lg:col-span-2">
       <div class="flex items-center justify-between mb-2"><div class="text-xs tracking-widest text-zinc-400">EQUITY CURVE</div><div class="text-[10px] text-zinc-500">cumulative realized P&amp;L</div></div>
@@ -118,10 +124,12 @@
     <div class="lg:col-span-2 rounded border border-zinc-800 bg-zinc-900/40 p-4 space-y-3">
       <div class="flex items-center justify-between"><div class="text-xs tracking-widest text-zinc-400">EDGE &amp; PROBABILITY ANALYZER</div><span class="text-[10px] text-zinc-500">multi-factor · weighted</span></div>
       <div class="grid grid-cols-2 gap-3 text-xs">
-        <label class="space-y-1"><div class="text-zinc-500">Market</div><input id="a_market" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
+        <label class="space-y-1"><div class="text-zinc-500">Market</div><input id="a_market" list="mktlist" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/><datalist id="mktlist"></datalist></label>
         <label class="space-y-1"><div class="text-zinc-500">Side (YES/NO)</div><select id="a_side" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"><option>YES</option><option>NO</option></select></label>
         <label class="space-y-1"><div class="text-zinc-500">Market price (¢ / 0–1)</div><input id="a_price" type="number" step="0.01" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
         <label class="space-y-1"><div class="text-zinc-500">Days to resolution</div><input id="a_days" type="number" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
+        <label class="space-y-1"><div class="text-zinc-500">Cluster / theme</div><input id="a_cluster" placeholder="e.g. Politics" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
+        <label class="space-y-1"><div class="text-zinc-500">Catalyst date (optional)</div><input id="a_catalyst" type="date" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
       </div>
       <div class="text-[10px] tracking-widest text-zinc-500 pt-2">FACTOR WEIGHTING (your subjective probability)</div>
       <div id="factors" class="space-y-2"></div>
@@ -163,6 +171,9 @@
         <label class="space-y-1"><div class="text-zinc-500">Fair p (0–1)</div><input id="s_p" type="number" step="0.01" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
         <label class="space-y-1"><div class="text-zinc-500">Market price (¢)</div><input id="s_price" type="number" step="0.01" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
         <label class="space-y-1"><div class="text-zinc-500">Max per-trade %</div><input id="s_cap" type="number" step="0.5" value="10" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
+        <label class="space-y-1"><div class="text-zinc-500">Fee (bps)</div><input id="s_fee" type="number" step="1" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
+        <label class="space-y-1"><div class="text-zinc-500">Cluster / theme</div><input id="s_cluster" placeholder="e.g. Politics" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
+        <label class="space-y-1 col-span-2"><div class="text-zinc-500">Link live token_id (optional → slippage-aware)</div><input id="s_tok" placeholder="token_id" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
       </div>
       <div class="text-[10px] tracking-widest text-zinc-500 pt-2">MODE</div>
       <div class="grid grid-cols-3 gap-2 text-xs">
@@ -180,7 +191,13 @@
         <div><div class="text-[10px] tracking-widest text-zinc-500">SHARES (≈)</div><div id="s_shares" class="text-3xl font-bold text-cyan-300 num">0</div></div>
         <div><div class="text-[10px] tracking-widest text-zinc-500">MAX LOSS</div><div id="s_loss" class="text-xl font-bold text-red-400 num">$0</div></div>
         <div><div class="text-[10px] tracking-widest text-zinc-500">MAX WIN</div><div id="s_win" class="text-xl font-bold text-emerald-400 num">$0</div></div>
-        <div class="col-span-2"><div class="text-[10px] tracking-widest text-zinc-500">EXPECTED VALUE</div><div id="s_ev" class="text-2xl font-bold num">$0</div></div>
+        <div><div class="text-[10px] tracking-widest text-zinc-500">EV (gross)</div><div id="s_ev" class="text-2xl font-bold num">$0</div></div>
+        <div><div class="text-[10px] tracking-widest text-zinc-500">EV (net: fees+slippage)</div><div id="s_evNet" class="text-2xl font-bold num">$0</div></div>
+        <div class="col-span-2 text-[10px] text-zinc-400 space-y-0.5">
+          <div>exec fill px (probe): <span id="s_exec" class="text-zinc-200">--</span> · slippage <span id="s_slip" class="text-zinc-200">--</span></div>
+          <div>multi-bet Kelly haircut: <span id="s_multi" class="text-zinc-200">--</span> (×, for <span id="s_nbets">0</span> open bets)</div>
+          <div id="s_riskNote" class="font-bold"></div>
+        </div>
       </div>
       <button id="s_open" class="w-full px-3 py-2 rounded bg-emerald-500 text-zinc-950 font-bold text-xs">OPEN POSITION IN PORTFOLIO</button>
     </div>
@@ -202,12 +219,16 @@
         <label class="space-y-1"><div class="text-zinc-500"># trades</div><input id="m_n" type="number" value="200" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
         <label class="space-y-1"><div class="text-zinc-500"># sims</div><input id="m_sims" type="number" value="500" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/></label>
       </div>
-      <button id="m_run" class="w-full px-3 py-2 rounded bg-fuchsia-500 text-zinc-950 font-bold text-xs">RUN SIMULATION</button>
+      <div class="flex gap-2">
+        <button id="m_run" class="flex-1 px-3 py-2 rounded bg-fuchsia-500 text-zinc-950 font-bold text-xs">RUN SIMULATION</button>
+        <button id="m_actual" class="flex-1 px-3 py-2 rounded bg-emerald-500 text-zinc-950 font-bold text-xs" title="bootstrap your ACTUAL closed-trade ROIs forward">PROJECT FROM MY TRADES</button>
+      </div>
       <div class="grid grid-cols-3 gap-3 pt-2">
         <div><div class="text-[10px] tracking-widest text-zinc-500">MEDIAN END</div><div id="m_med" class="text-xl font-bold num">--</div></div>
         <div><div class="text-[10px] tracking-widest text-zinc-500">P5 / P95</div><div id="m_band" class="text-xl font-bold num">--</div></div>
         <div><div class="text-[10px] tracking-widest text-zinc-500">% RUIN</div><div id="m_ruin" class="text-xl font-bold text-red-400 num">--</div></div>
       </div>
+      <div id="m_actualNote" class="text-[10px] text-zinc-500"></div>
     </div>
     <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4">
       <div class="text-xs tracking-widest text-zinc-400 mb-2">SIMULATED EQUITY PATHS</div>
@@ -266,10 +287,23 @@
       <div class="text-xs tracking-widest text-zinc-400 mb-2">P&amp;L BY MARKET</div>
       <canvas id="anByMarket" height="180"></canvas>
     </div>
-    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4 lg:col-span-2">
-      <div class="text-xs tracking-widest text-zinc-400 mb-2">EDGE → ROI CALIBRATION</div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4">
+      <div class="text-xs tracking-widest text-zinc-400 mb-2">EDGE → ROI (realized) <span id="anFit" class="text-[10px] text-zinc-500"></span></div>
       <canvas id="anCalib" height="180"></canvas>
     </div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4">
+      <div class="text-xs tracking-widest text-zinc-400 mb-2">PROBABILITY CALIBRATION <span id="anBrier" class="text-[10px] text-zinc-500"></span></div>
+      <canvas id="anCalibProb" height="180"></canvas>
+      <div class="text-[10px] text-zinc-500 mt-1">predicted prob (at entry) vs realized outcome · diagonal = perfect · needs resolved trades</div>
+    </div>
+  </div>
+  <div class="grid grid-cols-2 md:grid-cols-6 gap-3 text-xs">
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-3"><div class="text-[10px] text-zinc-500">SHARPE / trade</div><div id="anSharpe" class="text-xl font-bold num">--</div></div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-3"><div class="text-[10px] text-zinc-500">SORTINO</div><div id="anSortino" class="text-xl font-bold num">--</div></div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-3"><div class="text-[10px] text-zinc-500">PROFIT FACTOR</div><div id="anPF" class="text-xl font-bold num">--</div></div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-3"><div class="text-[10px] text-zinc-500">EXP / DAY</div><div id="anExpDay" class="text-xl font-bold num">--</div></div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-3"><div class="text-[10px] text-zinc-500">MAX LOSE STREAK</div><div id="anStreak" class="text-xl font-bold text-red-400 num">--</div></div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-3"><div class="text-[10px] text-zinc-500">CAGR (realized)</div><div id="anCAGR" class="text-xl font-bold num">--</div></div>
   </div>
   <div class="grid grid-cols-2 md:grid-cols-6 gap-3 text-xs">
     <div class="rounded border border-zinc-800 bg-zinc-900/40 p-3"><div class="text-[10px] text-zinc-500">TRADES</div><div id="anN" class="text-xl font-bold num">0</div></div>
@@ -285,6 +319,25 @@
 <!-- SCANNER -->
 <!-- =========================================================== -->
 <section data-pane="scanner" class="hidden space-y-4">
+  <!-- CYCLE 2 [FEATURE] (2026-05-29): #1/#2 discovery + #4 free-arb detector -->
+  <div class="grid lg:grid-cols-2 gap-4">
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4 space-y-3">
+      <div class="flex items-center justify-between">
+        <div class="text-xs tracking-widest text-zinc-400">DISCOVER LIVE MARKETS</div>
+        <button id="dsc_load" class="px-3 py-1.5 rounded bg-cyan-500 text-zinc-950 font-bold text-xs">⟳ LOAD TOP BY VOLUME</button>
+      </div>
+      <input id="dsc_q" placeholder="filter markets…" aria-label="Filter markets" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-xs"/>
+      <div id="dsc_list" class="space-y-1 text-xs max-h-72 overflow-y-auto scrollbar"><div class="text-zinc-500">Click LOAD to pull active Polymarket markets (Gamma API). Falls back to an honest "unavailable" if the network/CORS blocks it.</div></div>
+    </div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4 space-y-3">
+      <div class="text-xs tracking-widest text-zinc-400">FREE-ARB CHECK · YES-ask + NO-ask &lt; $1</div>
+      <div class="text-[10px] text-zinc-500">Paste both outcome token_ids of one market. If asks sum &lt; $1 you can buy both sides and lock a guaranteed $1 payout. (Or bids sum &gt; $1 → sell both.)</div>
+      <input id="arb_y" placeholder="YES token_id" aria-label="YES token id" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-xs"/>
+      <input id="arb_n" placeholder="NO token_id" aria-label="NO token id" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-xs"/>
+      <button id="arb_go" class="px-3 py-1.5 rounded bg-emerald-500 text-zinc-950 font-bold text-xs">CHECK ARBITRAGE</button>
+      <div id="arb_out" class="text-xs text-zinc-400"></div>
+    </div>
+  </div>
   <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4 space-y-3">
     <div class="flex items-center justify-between">
       <div class="text-xs tracking-widest text-zinc-400">HIGH-CONVICTION SCANNER</div>
@@ -297,7 +350,7 @@
     <div class="overflow-x-auto scrollbar">
       <table class="w-full text-xs">
         <thead class="text-zinc-500 text-[10px] tracking-widest">
-          <tr class="border-b border-zinc-800"><th class="text-left py-2">MARKET</th><th>SIDE</th><th>PX</th><th>FAIR</th><th>EDGE</th><th>CONF</th><th>DAYS</th><th>SCORE</th><th>ACT</th></tr>
+          <tr class="border-b border-zinc-800"><th class="text-left py-2">MARKET</th><th>SIDE</th><th>PX</th><th>FAIR</th><th>EDGE</th><th title="cross-venue reference price (manual) and arb gap vs Polymarket px">REF/ARB</th><th>CONF</th><th>DAYS</th><th>SCORE</th><th>ACT</th></tr>
         </thead>
         <tbody id="sc_rows" class="num"></tbody>
       </table>
@@ -347,21 +400,23 @@ const DEFAULT_STATE = {
     { name: 'Tail / catalyst risk',             prob: 0.50, weight: 0.15 },
   ],
   sizer: { mode: 'aggressive' },
+  // CYCLE 2 [FEATURE] (2026-05-29): tunable settings for fee/cost-adjusted EV, risk budget, slippage probe
+  settings: { feeBps: 0, riskBudgetPct: 60, probeShares: 500, slipBand: 0.03 },
   scanner: [
-    { market:'EX: Will candidate X win primary?', side:'YES', price:0.42, fair:0.52, conf:70, days:45 },
-    { market:'EX: Fed cuts >50bps in H1',         side:'NO',  price:0.71, fair:0.62, conf:65, days:90 },
-    { market:'EX: Movie Y opens >$80M',           side:'YES', price:0.36, fair:0.48, conf:62, days:14 },
+    { market:'EX: Will candidate X win primary?', side:'YES', price:0.42, fair:0.52, conf:70, days:45, ref:null, cluster:'Politics' },
+    { market:'EX: Fed cuts >50bps in H1',         side:'NO',  price:0.71, fair:0.62, conf:65, days:90, ref:null, cluster:'Macro' },
+    { market:'EX: Movie Y opens >$80M',           side:'YES', price:0.36, fair:0.48, conf:62, days:14, ref:null, cluster:'Entertainment' },
   ],
   positions: [
     // sample open position
-    { id: 'demo1', market:'EX: Will candidate X win primary?', side:'YES', entry:0.42, price:0.47, shares:200, stake:84, opened:Date.now()-86400000*5, status:'open', reason:'10c modeled edge, conf 70' }
+    { id: 'demo1', market:'EX: Will candidate X win primary?', side:'YES', entry:0.42, price:0.47, shares:200, stake:84, opened:Date.now()-86400000*5, status:'open', reason:'10c modeled edge, conf 70', pEntry:0.52, cluster:'Politics', tokenId:'', catalyst:Date.now()+86400000*40 }
   ],
   closed: [
-    { id:'c1', market:'EX: Senate seat A flips',   side:'YES', entry:0.30, exit:0.55, shares:300, stake:90,  pnl:75, reason:'Hit +50% partial target', closedAt: Date.now()-86400000*12 },
-    { id:'c2', market:'EX: Bill passes by Mar 1',  side:'NO',  entry:0.40, exit:0.20, shares:250, stake:100, pnl:50, reason:'Thesis confirmed',        closedAt: Date.now()-86400000*8  },
-    { id:'c3', market:'EX: Team Z makes playoffs', side:'YES', entry:0.55, exit:0.33, shares:200, stake:110, pnl:-44,reason:'Thesis broke (-40% stop)',closedAt: Date.now()-86400000*4  },
+    { id:'c1', market:'EX: Senate seat A flips',   side:'YES', entry:0.30, exit:0.55, shares:300, stake:90,  pnl:75, reason:'Hit +50% partial target', closedAt: Date.now()-86400000*12, pEntry:0.58, outcome:1, cluster:'Politics' },
+    { id:'c2', market:'EX: Bill passes by Mar 1',  side:'NO',  entry:0.40, exit:0.20, shares:250, stake:100, pnl:50, reason:'Thesis confirmed',        closedAt: Date.now()-86400000*8,  pEntry:0.63, outcome:1, cluster:'Politics' },
+    { id:'c3', market:'EX: Team Z makes playoffs', side:'YES', entry:0.55, exit:0.33, shares:200, stake:110, pnl:-44,reason:'Thesis broke (-40% stop)',closedAt: Date.now()-86400000*4,  pEntry:0.61, outcome:0, cluster:'Sports' },
   ],
-  live: [] // [{tokenId, label, mid, best_bid, best_ask, last, bids:[], asks:[], trades:[]}]
+  live: [] // [{tokenId, label, mid, best_bid, best_ask, last, bids:[], asks:[], trades:[], imbHist:[]}]
 };
 
 let state = load();
@@ -463,17 +518,21 @@ function renderAnalyzer(){
     state.scanner.unshift({
       market: $('a_market').value || 'untitled', side: $('a_side').value,
       price: o.implied, fair: o.fair, conf: Math.round(o.conf*100),
-      days: Number($('a_days').value)||30
+      days: Number($('a_days').value)||30, ref:null, cluster: ($('a_cluster')?.value||'').trim()
     });
     save(); showTab('scanner');
   };
   $('a_size').onclick = () => {
     const o = computeAnalyzer(); if (!o) return;
     $('s_bank').value = state.bankroll;
-    $('s_p').value = o.fair.toFixed(3);
-    $('s_price').value = o.implied.toFixed(2);
+    // CYCLE 2 [FEATURE] (2026-05-29): carry the SIDE-adjusted prob/price + cluster into the sizer
+    $('s_p').value = o.sideProb.toFixed(3);
+    $('s_price').value = o.sideImplied.toFixed(2);
+    if ($('s_cluster')) $('s_cluster').value = ($('a_cluster')?.value||'').trim();
     showTab('sizer'); recalcSizer();
   };
+  // populate market autocomplete from discovery cache (best-effort)
+  const dl=$('mktlist'); if(dl && _marketCache){ dl.innerHTML=_marketCache.slice(0,200).map(m=>`<option value="${esc(m.q)}"></option>`).join(''); }
   $('a_clear').onclick = () => { ['a_market','a_price','a_days'].forEach(id=>$(id).value=''); recalcAnalyzer(); };
   recalcAnalyzer();
 }
@@ -524,8 +583,8 @@ function renderSizer(){
     b.onclick = ()=>{ state.sizer.mode = b.dataset.mode; save(); paintMode(); recalcSizer(); };
   });
   paintMode();
-  ['s_bank','s_p','s_price','s_cap'].forEach(id=>{
-    $(id).oninput = recalcSizer;
+  ['s_bank','s_p','s_price','s_cap','s_fee','s_cluster','s_tok'].forEach(id=>{
+    if ($(id)) $(id).oninput = recalcSizer;
   });
   $('s_open').onclick = openPositionFromSizer;
   if (!$('s_bank').value) $('s_bank').value = state.bankroll;
@@ -550,30 +609,61 @@ function recalcSizer(){
   const used = Math.max(0, kelly*frac);
   const stakePct = Math.min(used, cap);
   const stake = bank * stakePct;
-  const shares = px>0 ? stake/px : 0;
-  const maxLoss = stake;
+  // CYCLE 2 [FEATURE] (2026-05-29): #14 shrink size for concurrent bets (correlation guard)
+  const multi = concurrentKellyScale();
+  const shares = px>0 ? (stake*multi)/px : 0;
+  const adjStake = shares*px;
+  const maxLoss = adjStake;
   const maxWin = shares * (1-px);
   const ev = shares * (p*(1-px) - (1-p)*px);
+  // CYCLE 2 [FEATURE] (2026-05-29): #7/#15 slippage- and fee-adjusted EV (executable, not mid)
+  if ($('s_fee') && $('s_fee').value==='' ) $('s_fee').value = cfg().feeBps;
+  const feeBps = Number($('s_fee')?.value)||0; cfg().feeBps = feeBps;
+  const fee = Math.max(0,feeBps/10000);
+  const tok = $('s_tok')?.value.trim();
+  let execPx = px, slip = 0;
+  if (tok){ const sub = state.live.find(x=>x.tokenId===tok); if (sub && (sub.asks||[]).length){ const f=walkLadder(sub.asks, shares||(cfg().probeShares||500)); if(f.filled){ execPx=f.avg; slip=execPx-px; } } }
+  const evNet = shares * (p*(1-execPx) - (1-p)*execPx) - shares*execPx*fee;
   $('s_k').textContent = (kelly*100).toFixed(1)+'%';
   $('s_kFrac').textContent = (frac*100).toFixed(0)+'% Kelly';
-  $('s_stake').textContent = usd(stake);
+  $('s_stake').textContent = usd(adjStake);
   $('s_shares').textContent = Math.round(shares).toLocaleString();
   $('s_loss').textContent = usd(-maxLoss);
   $('s_win').textContent  = usd(maxWin);
   $('s_ev').textContent   = (ev>=0?'+':'') + usd(ev);
   $('s_ev').className = 'text-2xl font-bold num ' + (ev>=0?'text-emerald-400':'text-red-400');
+  if ($('s_evNet')){ $('s_evNet').textContent = (evNet>=0?'+':'')+usd(evNet); $('s_evNet').className = 'text-2xl font-bold num ' + (evNet>=0?'text-emerald-400':'text-red-400'); }
+  if ($('s_exec')) $('s_exec').textContent = tok ? cents(execPx) : 'n/a (link token)';
+  if ($('s_slip')) $('s_slip').textContent = tok ? (slip>0?'+':'')+(slip*100).toFixed(2)+'¢' : '--';
+  if ($('s_multi')){ $('s_multi').textContent = multi.toFixed(2); $('s_nbets').textContent = state.positions.length; }
+  // #12/#13 cluster + heat guard
+  if ($('s_riskNote')){
+    const heat = portfolioHeat();
+    const cl = ($('s_cluster')?.value||'').trim() || 'Uncategorized';
+    const ce = clusterExposure(); const clPctNow = heat.bank ? ((ce.by[cl]||0)+adjStake)/heat.bank*100 : 0;
+    const newHeat = heat.bank ? (heat.total+adjStake)/heat.bank*100 : 0;
+    let warn=[];
+    if (newHeat>heat.budget) warn.push(`⚠ portfolio heat would hit ${newHeat.toFixed(0)}% (budget ${heat.budget}%)`);
+    if (clPctNow>25) warn.push(`⚠ "${esc(cl)}" cluster would hit ${clPctNow.toFixed(0)}% (cap 25%)`);
+    if (evNet<0) warn.push('⚠ net EV is negative after costs — do not trade');
+    $('s_riskNote').innerHTML = warn.length ? warn.map(w=>`<div class="text-red-400">${w}</div>`).join('') : '<span class="text-emerald-400">✓ within risk budget & cluster cap</span>';
+  }
 }
 function openPositionFromSizer(){
   const market = prompt('Market label?', 'New position') || 'New position';
   const side = (prompt('Side (YES/NO)?','YES')||'YES').toUpperCase();
   const reason = prompt('Reason / thesis?','') || '';
   let px = Number($('s_price').value); if (px>1) px/=100;
+  let pEntry = Number($('s_p').value); if (pEntry>1) pEntry/=100; // #17 capture modeled prob for calibration
   const shares = Number($('s_shares').textContent.replace(/[^0-9.-]/g,''));
   const stake  = Number($('s_stake').textContent.replace(/[^0-9.-]/g,''));
   if (!px || !shares) return alert('Set fair p and price first.');
   state.positions.unshift({
     id: 'p_'+Date.now(), market, side, entry: px, price: px, shares, stake,
-    opened: Date.now(), status:'open', reason
+    opened: Date.now(), status:'open', reason,
+    pEntry: Number.isFinite(pEntry)?pEntry:null,        // #17
+    cluster: ($('s_cluster')?.value||'').trim()||'Uncategorized', // #12
+    tokenId: ($('s_tok')?.value||'').trim()||''          // live price-sync link
   });
   save(); showTab('portfolio');
 }
@@ -636,6 +726,18 @@ function percentilePath(paths, q){
   return out;
 }
 $('m_run').onclick = runMC;
+// CYCLE 2 [FEATURE] (2026-05-29): #20 bootstrap forward projection from YOUR realized trade ROIs
+if ($('m_actual')) $('m_actual').onclick = () => {
+  const N = clamp(Math.floor(Number($('m_n').value)||200),1,5000);
+  const S = clamp(Math.floor(Number($('m_sims').value)||500),1,2000);
+  const r = bootstrapProjection(N,S);
+  const note=$('m_actualNote');
+  if (!r){ if(note) note.textContent='Need ≥5 closed trades to project from your real history.'; return; }
+  $('m_med').textContent  = usd(r.med);
+  $('m_band').textContent = usd(r.p5)+' / '+usd(r.p95);
+  $('m_ruin').textContent = r.ruin.toFixed(1)+'%';
+  if (note) note.textContent = `bootstrapped ${N} future trades from your ${r.n} closed-trade ROIs · avg stake ${(r.avgFrac*100).toFixed(1)}% of bankroll · seeded (reproducible)`;
+};
 
 /* ------------------------------ PORTFOLIO ------------------------------ */
 function renderPortfolio(){
@@ -648,7 +750,8 @@ function renderPortfolio(){
     const tr = document.createElement('tr');
     tr.className='border-b border-zinc-800/60 hover:bg-zinc-900/60';
     tr.innerHTML = `
-      <td class="py-2"><div class="font-semibold">${esc(p.market)}</div><div class="text-[10px] text-zinc-500">${new Date(p.opened).toLocaleDateString()} · ${esc(p.reason||'')}</div></td>
+      <td class="py-2"><div class="font-semibold">${esc(p.market)}</div><div class="text-[10px] text-zinc-500">${new Date(p.opened).toLocaleDateString()} · ${esc(p.reason||'')}</div>
+        <div class="text-[10px] mt-0.5 flex gap-2 flex-wrap">${p.cluster?`<span class="px-1 rounded bg-zinc-800 text-zinc-300">${esc(p.cluster)}</span>`:''}${(()=>{ const d=daysTo(p.catalyst); return d==null?'':`<span class="${d<=3?'text-amber-400':'text-zinc-500'}">⏱ ${d<0?'catalyst passed':d+'d to catalyst'}</span>`; })()}</div></td>
       <td class="text-center">${p.side}</td>
       <td class="text-center">${cents(p.entry)}</td>
       <td class="text-center"><input data-id="${p.id}" data-k="price" type="number" step="0.01" value="${p.price.toFixed(2)}" class="w-16 bg-zinc-950 border border-zinc-800 rounded px-1 py-0.5 text-center"/></td>
@@ -674,7 +777,11 @@ function renderPortfolio(){
     if (a==='close'){
       const reason = prompt('Close reason?','Manual close') || '';
       const pnl = p.side==='YES' ? (p.price - p.entry)*p.shares : (p.entry - p.price)*p.shares;
-      state.closed.unshift({ id:'c_'+Date.now(), market:p.market, side:p.side, entry:p.entry, exit:p.price, shares:p.shares, stake:p.stake, pnl, reason, closedAt: Date.now() });
+      // CYCLE 2 [FEATURE] (2026-05-29): #17 capture resolution outcome for probability calibration (honest: blank = early exit, excluded from Brier)
+      let outcome = null;
+      const res = (prompt('Did this market RESOLVE? type W = my side won, L = my side lost, or leave blank for an early exit (not a resolution).','') || '').trim().toUpperCase();
+      if (res==='W') outcome = 1; else if (res==='L') outcome = 0;
+      state.closed.unshift({ id:'c_'+Date.now(), market:p.market, side:p.side, entry:p.entry, exit:p.price, shares:p.shares, stake:p.stake, pnl, reason, closedAt: Date.now(), pEntry: Number.isFinite(p.pEntry)?p.pEntry:null, outcome, cluster:p.cluster||'' });
       state.positions = state.positions.filter(x=>x.id!==id);
       save(); renderPortfolio(); renderDashboard();
     }
@@ -726,6 +833,19 @@ function renderDashboard(){
   const wr = state.closed.length ? wins/state.closed.length : 0;
   const ev = state.closed.length ? realized/state.closed.length : 0;
   $('kpiWin').textContent = state.closed.length ? `${(wr*100).toFixed(0)}% · ${usd(ev)}/trd` : '--';
+  // CYCLE 2 [FEATURE] (2026-05-29): #13 heat gauge + #12 cluster bars
+  if ($('heatBar')){
+    const heat = portfolioHeat();
+    $('heatTxt').textContent = `${usd(heat.total)} at risk · ${heat.pct.toFixed(0)}% of bankroll (budget ${heat.budget}%)`;
+    $('heatBar').style.width = clamp(heat.pct,0,100)+'%';
+    $('heatBar').className = 'h-full ' + (heat.over?'bg-red-500':heat.pct>heat.budget*0.75?'bg-amber-500':'bg-emerald-500');
+    const ce = clusterExposure(); const bank = state.bankroll||0;
+    const entries = Object.entries(ce.by).sort((a,b)=>b[1]-a[1]);
+    $('clusterBars').innerHTML = entries.length ? entries.map(([k,v])=>{
+      const pc = bank? v/bank*100 : 0; const over = pc>25;
+      return `<div class="flex items-center gap-2"><div class="w-28 truncate">${esc(k)}</div><div class="flex-1 h-1.5 rounded bg-zinc-800 overflow-hidden"><div class="h-full ${over?'bg-red-500':'bg-cyan-500'}" style="width:${clamp(pc,0,100)}%"></div></div><div class="w-20 text-right ${over?'text-red-400':'text-zinc-400'} num">${usd(v)} ${pc.toFixed(0)}%${over?' ⚠':''}</div></div>`;
+    }).join('') : '<div class="text-zinc-600">no open positions</div>';
+  }
   // Recent
   const rec = $('recentTrades'); rec.innerHTML='';
   state.closed.slice(0,8).forEach(c=>{
@@ -747,13 +867,13 @@ function renderDashboard(){
 }
 
 /* ------------------------------ ANALYTICS ------------------------------ */
-let anE, anW, anM, anC;
+let anE, anW, anM, anC, anCP;
 function renderAnalytics(){
   const closed = [...state.closed].sort((a,b)=>a.closedAt-b.closedAt);
   let cum=0; const eq=closed.map(c=>{ cum+=c.pnl; return cum; });
   let peak=-Infinity, dd=[]; eq.forEach(v=>{ peak=Math.max(peak,v); dd.push(v-peak); });
   const labels = closed.map(c=>new Date(c.closedAt).toLocaleDateString());
-  [anE,anW,anM,anC].forEach(c=>c&&c.destroy());
+  [anE,anW,anM,anC,anCP].forEach(c=>c&&c.destroy());
   anE = new Chart($('anEquity'), {
     type:'line', data:{ labels, datasets:[
       { data:eq, borderColor:'#22c55e', borderWidth:2, pointRadius:0, label:'equity', fill:false },
@@ -778,10 +898,35 @@ function renderAnalytics(){
     const roi = c.stake ? c.pnl/c.stake : 0;
     return { x: edgeC*100, y: roi*100 };
   });
+  // CYCLE 2 [FEATURE] (2026-05-29): #19 least-squares fit + R² over edge→ROI
+  const fit = linfit(calib);
+  let fitLine = [];
+  if (fit){ const xs=calib.map(p=>p.x); const lo=Math.min(...xs), hi=Math.max(...xs); fitLine=[{x:lo,y:fit.m*lo+fit.b},{x:hi,y:fit.m*hi+fit.b}]; }
+  $('anFit').textContent = fit ? `· slope ${fit.m.toFixed(2)} · R² ${fit.r2.toFixed(2)}` : '';
   anC = new Chart($('anCalib'), {
     type:'scatter',
-    data:{ datasets:[{ data:calib, backgroundColor:'#06b6d4' }]},
+    data:{ datasets:[
+      { data:calib, backgroundColor:'#06b6d4' },
+      { type:'line', data:fitLine, borderColor:'#f59e0b', borderWidth:1.5, pointRadius:0, borderDash:[5,4], parsing:false }
+    ]},
     options:{ animation:false, plugins:{legend:{display:false}}, scales:{ x:{title:{display:true,text:'realized edge (¢)',color:'#a1a1aa'},ticks:{color:'#a1a1aa'},grid:{color:'#27272a'}}, y:{title:{display:true,text:'ROI %',color:'#a1a1aa'},ticks:{color:'#a1a1aa'},grid:{color:'#27272a'}}}}
+  });
+  // CYCLE 2 [FEATURE] (2026-05-29): #17 probability calibration (predicted prob at entry vs realized outcome) + Brier
+  const resolved = closed.filter(c=>Number.isFinite(c.pEntry) && (c.outcome===0||c.outcome===1));
+  const preds = resolved.map(c=>({ p:c.pEntry, outcome:c.outcome }));
+  const bs = brier(preds);
+  $('anBrier').textContent = bs!=null ? `· Brier ${bs.toFixed(3)} · n=${preds.length}` : '· no resolved trades yet';
+  // bucket into deciles
+  const buckets = Array.from({length:10},(_,i)=>({lo:i/10,hi:(i+1)/10,n:0,sumP:0,sumO:0}));
+  preds.forEach(pr=>{ const b=buckets[clamp(Math.floor(pr.p*10),0,9)]; b.n++; b.sumP+=pr.p; b.sumO+=pr.outcome; });
+  const calPts = buckets.filter(b=>b.n>0).map(b=>({x:b.sumP/b.n*100, y:b.sumO/b.n*100}));
+  anCP = new Chart($('anCalibProb'), {
+    type:'scatter',
+    data:{ datasets:[
+      { data:calPts, backgroundColor:'#22c55e', pointRadius:5 },
+      { type:'line', data:[{x:0,y:0},{x:100,y:100}], borderColor:'#52525b', borderWidth:1, pointRadius:0, borderDash:[4,4], parsing:false }
+    ]},
+    options:{ animation:false, plugins:{legend:{display:false}}, scales:{ x:{min:0,max:100,title:{display:true,text:'predicted %',color:'#a1a1aa'},ticks:{color:'#a1a1aa'},grid:{color:'#27272a'}}, y:{min:0,max:100,title:{display:true,text:'actual win %',color:'#a1a1aa'},ticks:{color:'#a1a1aa'},grid:{color:'#27272a'}}}}
   });
   // KPIs
   $('anN').textContent = closed.length;
@@ -793,6 +938,22 @@ function renderAnalytics(){
   const exp = closed.length ? closed.reduce((a,c)=>a+c.pnl,0)/closed.length : 0;
   $('anExp').textContent = closed.length ? usd(exp) : '--';
   $('anDD').textContent = dd.length ? usd(Math.min(...dd)) : '--';
+  // CYCLE 2 [FEATURE] (2026-05-29): #18 risk-adjusted performance
+  const rois = closed.map(c=> c.stake ? c.pnl/c.stake : 0).filter(Number.isFinite);
+  const pnls = closed.map(c=>c.pnl);
+  const fmt = (v,suf='')=> Number.isFinite(v) ? (v===Infinity?'∞':v.toFixed(2)+suf) : '--';
+  $('anSharpe').textContent  = rois.length>1 ? fmt(sharpe(rois)) : '--';
+  $('anSortino').textContent = rois.length>1 ? (sortino(rois)===Infinity?'∞':fmt(sortino(rois))) : '--';
+  $('anPF').textContent      = pnls.length ? (profitFactor(pnls)===Infinity?'∞':fmt(profitFactor(pnls))) : '--';
+  // expectancy per day across the realized window
+  let expDay='--';
+  if (closed.length>1){ const span=Math.max(1,(closed[closed.length-1].closedAt-closed[0].closedAt)/86400000); expDay=usd(closed.reduce((a,c)=>a+c.pnl,0)/span); }
+  $('anExpDay').textContent = expDay;
+  $('anStreak').textContent = closed.length ? losingStreak(closed) : '--';
+  // realized CAGR: total return on starting bankroll over the realized window
+  let cagr='--';
+  if (closed.length>1){ const span=(closed[closed.length-1].closedAt-closed[0].closedAt)/86400000; const yrs=Math.max(span/365,1/365); const base=state.bankroll - cum; const endV=state.bankroll; if (base>0 && endV>0){ cagr=((Math.pow(endV/base,1/yrs)-1)*100).toFixed(0)+'%'; } }
+  $('anCAGR').textContent = cagr;
 }
 
 /* ------------------------------ SCANNER ------------------------------ */
@@ -806,6 +967,10 @@ function renderScanner(){
     .sort((a,b)=>b.score-a.score)
     .forEach(r=>{
       const ok = (r.edge >= minE) && (r.conf >= minC);
+      // CYCLE 2 [FEATURE] (2026-05-29): #3 cross-venue ref gap (manual reference price vs Polymarket px)
+      const refGap = Number.isFinite(r.ref) ? (r.price - r.ref) : null; // +ve → PM richer (buy elsewhere/fade), -ve → PM cheap
+      const refCell = refGap==null ? '<span class="text-zinc-600">set</span>'
+        : `${cents(r.ref)} <span class="${Math.abs(refGap)>=0.03?(refGap<0?'text-emerald-400':'text-red-400'):'text-zinc-500'}">${refGap>=0?'+':''}${(refGap*100).toFixed(1)}¢</span>`;
       const tr = document.createElement('tr');
       tr.className='border-b border-zinc-800/60 ' + (ok?'bg-emerald-500/5':'');
       tr.innerHTML = `
@@ -814,6 +979,7 @@ function renderScanner(){
         <td class="text-center">${cents(r.price)}</td>
         <td class="text-center">${cents(r.fair)}</td>
         <td class="text-center ${r.edge>=0.05?'text-emerald-400':r.edge>=0?'text-amber-400':'text-red-400'}">${(r.edge*100>=0?'+':'')+(r.edge*100).toFixed(1)}¢</td>
+        <td class="text-center"><button class="underline decoration-dotted" data-ref="${r._i}" title="set cross-venue reference price">${refCell}</button></td>
         <td class="text-center">${r.conf}%</td>
         <td class="text-center">${r.days}</td>
         <td class="text-center font-bold ${ok?'text-emerald-400':'text-zinc-400'}">${r.score.toFixed(2)}</td>
@@ -821,11 +987,18 @@ function renderScanner(){
       rows.appendChild(tr);
     });
   rows.onclick = e => {
-    const sc = e.target.dataset.sc, rm = e.target.dataset.rm;
+    const sc = e.target.dataset.sc, rm = e.target.dataset.rm, ref = e.target.closest('[data-ref]')?.dataset.ref;
     if (sc!=null){
       const r = state.scanner[Number(sc)];
       $('a_market').value = r.market; $('a_side').value = r.side; $('a_price').value = r.price; $('a_days').value = r.days;
       showTab('analyzer');
+    }
+    if (ref!=null){
+      const r = state.scanner[Number(ref)];
+      const v = prompt('Cross-venue reference price for "'+r.market+'" (0-1 or 0-100¢, blank to clear)?', r.ref!=null? r.ref : '');
+      if (v===null) return;
+      const n = v.trim()===''? null : (Number(v)>1? Number(v)/100 : Number(v));
+      r.ref = (n!=null && Number.isFinite(n)) ? n : null; save(); renderScanner();
     }
     if (rm!=null){ state.scanner.splice(Number(rm),1); save(); renderScanner(); }
   };
@@ -838,9 +1011,54 @@ $('sc_add').onclick = () => {
   const fair = Number(prompt('Fair p (0-1)?','0.55')) || 0.5;
   const conf = Number(prompt('Confidence %?','65')) || 60;
   const days = Number(prompt('Days to resolution?','30')) || 30;
-  state.scanner.unshift({ market, side, price: price>1?price/100:price, fair, conf, days });
+  state.scanner.unshift({ market, side, price: price>1?price/100:price, fair, conf, days, ref:null, cluster:'' });
   save(); renderScanner();
 };
+
+/* ---- CYCLE 2 [FEATURE] (2026-05-29): #1/#2 market discovery + #4 arb checker handlers ---- */
+let _dscMarkets = [];
+function renderDiscovery(){
+  const box=$('dsc_list'); if(!box) return;
+  const q=($('dsc_q')?.value||'').toLowerCase();
+  const list=_dscMarkets.filter(m=>!q || m.q.toLowerCase().includes(q)).slice(0,60);
+  if(!list.length){ box.innerHTML='<div class="text-zinc-500">no markets — click LOAD (or none match filter)</div>'; return; }
+  box.innerHTML = list.map((m,i)=>{
+    const d=daysTo(m.end);
+    return `<div class="flex items-center gap-2 border-b border-zinc-800/60 py-1">
+      <div class="min-w-0 flex-1"><div class="truncate">${esc(m.q)}</div>
+      <div class="text-[10px] text-zinc-500">YES ${m.yes!=null?cents(m.yes):'--'} · vol $${Math.round(m.vol).toLocaleString()}${d!=null?` · ${d}d`:''}</div></div>
+      <button class="text-cyan-300 text-xs shrink-0" data-dsc="${i}">→ analyze</button>
+      ${m.tokens&&m.tokens.length>=2?`<button class="text-emerald-400 text-xs shrink-0" data-arb="${i}">arb</button>`:''}
+    </div>`;
+  }).join('');
+  box.onclick = e => {
+    const di=e.target.dataset.dsc, ai=e.target.dataset.arb;
+    if(di!=null){ const m=list[Number(di)]; $('a_market').value=m.q; if(m.yes!=null)$('a_price').value=m.yes.toFixed(2); const d=daysTo(m.end); if(d!=null)$('a_days').value=Math.max(0,d); showTab('analyzer'); }
+    if(ai!=null){ const m=list[Number(ai)]; $('arb_y').value=m.tokens[0]||''; $('arb_n').value=m.tokens[1]||''; runArb(); }
+  };
+}
+if($('dsc_load')) $('dsc_load').onclick = async () => {
+  const box=$('dsc_list'); box.innerHTML='<div class="text-cyan-300">loading…</div>';
+  const m=await loadMarkets(true);
+  if(!m){ box.innerHTML='<div class="text-amber-400">Market list unavailable (network/CORS blocked from the browser). The arb checker and manual entry still work.</div>'; return; }
+  _dscMarkets=m; renderDiscovery();
+};
+if($('dsc_q')) $('dsc_q').oninput = renderDiscovery;
+async function runArb(){
+  const out=$('arb_out'); const y=$('arb_y').value.trim(), n=$('arb_n').value.trim();
+  if(!y||!n){ out.textContent='paste both token_ids.'; return; }
+  out.innerHTML='<span class="text-cyan-300">checking…</span>';
+  const r=await arbCheck(y,n);
+  if(!r.ok){ out.innerHTML=`<span class="text-amber-400">${esc(r.reason)}</span>`; return; }
+  const lines=[];
+  lines.push(`YES ask ${r.askY!=null?cents(r.askY):'--'} · NO ask ${r.askN!=null?cents(r.askN):'--'} → sum ${r.buyBoth!=null?cents(r.buyBoth):'--'}`);
+  if(r.buyEdge!=null && r.buyEdge>0.001) lines.push(`<span class="text-emerald-400 font-bold">✓ BUY-BOTH ARB: lock +${(r.buyEdge*100).toFixed(1)}¢ per $1 payout (buy YES+NO now)</span>`);
+  lines.push(`YES bid ${r.bidY!=null?cents(r.bidY):'--'} · NO bid ${r.bidN!=null?cents(r.bidN):'--'} → sum ${r.sellBoth!=null?cents(r.sellBoth):'--'}`);
+  if(r.sellEdge!=null && r.sellEdge>0.001) lines.push(`<span class="text-emerald-400 font-bold">✓ SELL-BOTH ARB: lock +${(r.sellEdge*100).toFixed(1)}¢ per $1 (sell YES+NO if you hold both)</span>`);
+  if((r.buyEdge==null||r.buyEdge<=0.001)&&(r.sellEdge==null||r.sellEdge<=0.001)) lines.push('<span class="text-zinc-500">no arb right now (efficient). Re-check — books move fast.</span>');
+  out.innerHTML=lines.map(l=>`<div>${l}</div>`).join('');
+}
+if($('arb_go')) $('arb_go').onclick = runArb;
 
 /* ------------------------------ LIVE WS ------------------------------ */
 const WS_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws/market';
@@ -953,6 +1171,8 @@ function liveCardHtml(s, i){
   const maxSz = Math.max(...bidsTop.map(b=>b.size),...asksTop.map(a=>a.size), 1);
   // volume profile bins
   const profile = volumeProfile(s.trades||[]);
+  const M = liveMetrics(s); // CYCLE 2 [FEATURE] (2026-05-29): #6-#11 spread, microprice, slippage, liquidity, VWAP, flow, imbalance trend
+  const ce = v => Number.isFinite(v)?cents(v):'--';
   return `
     <div class="flex items-center justify-between">
       <div class="min-w-0">
@@ -967,8 +1187,16 @@ function liveCardHtml(s, i){
       <div><div class="text-[10px] text-zinc-500">MID</div><div class="text-cyan-300 num">${s.mid?cents(s.mid):'--'}</div></div>
       <div><div class="text-[10px] text-zinc-500">LAST</div><div class="num">${s.last?cents(s.last):'--'}</div></div>
     </div>
+    <div class="grid grid-cols-3 gap-2 text-[10px] text-zinc-400 num border-t border-zinc-800/60 pt-2">
+      <div><div class="text-zinc-500">SPREAD</div><div>${M.spread!=null?ce(M.spread)+(M.spreadPct!=null?' ('+(M.spreadPct*100).toFixed(1)+'%)':''):'--'}</div></div>
+      <div><div class="text-zinc-500">MICROPRICE</div><div class="text-cyan-300">${ce(M.micro)}</div></div>
+      <div><div class="text-zinc-500">VWAP</div><div>${(s.trades||[]).length?ce(M.vw):'--'}</div></div>
+      <div title="avg fill price to BUY ${M.probe} shares, and the slippage vs best ask"><div class="text-zinc-500">FILL ${M.probe}sh</div><div>${M.fill.filled?ce(M.fill.avg):'--'}${M.slip!=null?` <span class="${M.slip>0?'text-red-400':'text-emerald-400'}">${M.slip>0?'+':''}${(M.slip*100).toFixed(1)}¢</span>`:''}</div></div>
+      <div title="resting size within ±${(cfg().slipBand*100).toFixed(0)}¢ of mid"><div class="text-zinc-500">LIQ ±${(cfg().slipBand*100).toFixed(0)}¢</div><div><span class="text-emerald-400">${M.liqBid.toFixed(0)}</span>/<span class="text-red-400">${M.liqAsk.toFixed(0)}</span></div></div>
+      <div title="share of taker volume that was BUY"><div class="text-zinc-500">BUY FLOW</div><div class="${M.bShare>=0.5?'text-emerald-400':'text-red-400'}">${(s.trades||[]).length?(M.bShare*100).toFixed(0)+'%':'--'}</div></div>
+    </div>
     <div>
-      <div class="flex items-center justify-between text-[10px] text-zinc-500"><div>DEPTH (top 8)</div><div>imbalance <span class="${imb>=0?'text-emerald-400':'text-red-400'}">${(imb*100).toFixed(0)}%</span></div></div>
+      <div class="flex items-center justify-between text-[10px] text-zinc-500"><div>DEPTH (top 8) · ${M.tradesPerMin?M.tradesPerMin.toFixed(1)+'/min':''}</div><div class="flex items-center gap-1">imbalance ${sparkline(s.imbHist)} <span class="${imb>=0?'text-emerald-400':'text-red-400'}">${(imb*100).toFixed(0)}%</span></div></div>
       <div class="rounded bg-zinc-950 border border-zinc-800 mt-1 overflow-hidden">
         ${asksTop.map(a=>`<div class="ladder-row" style="background:linear-gradient(90deg, transparent ${100-Math.round(a.size/maxSz*100)}%, rgba(239,68,68,0.25) 0)"><div class="text-zinc-500">${a.size.toFixed(0)}</div><div class="text-center text-red-400 num">${cents(a.price)}</div><div></div></div>`).join('')}
         <div class="ladder-row bg-zinc-900 border-y border-zinc-800"><div></div><div class="text-center text-cyan-300 num">${s.mid?cents(s.mid):'--'}</div><div></div></div>
@@ -1025,6 +1253,144 @@ document.addEventListener('click', e => {
 /* ------------------------------ UTIL ------------------------------ */
 function esc(s){ return String(s??'').replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 
+/* ====================================================================== */
+/* CYCLE 2 [FEATURE] (2026-05-29): profit engine — arb, cost-adjusted EV,  */
+/* microstructure, correlation risk, calibration, discovery, projection.  */
+/* All external fetches degrade to an honest empty state (never fabricate).*/
+/* ====================================================================== */
+const cfg = () => state.settings || (state.settings = { feeBps:0, riskBudgetPct:60, probeShares:500, slipBand:0.03 });
+const finite = v => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+async function safeJson(url){ try { const r = await fetch(url); if(!r.ok) return null; return await r.json(); } catch { return null; } }
+
+/* ---- math / stats ---- */
+function mean(xs){ return xs.length ? xs.reduce((a,b)=>a+b,0)/xs.length : 0; }
+function stdev(xs){ if(xs.length<2) return 0; const m=mean(xs); return Math.sqrt(xs.reduce((a,b)=>a+(b-m)**2,0)/(xs.length-1)); }
+function sharpe(rois){ const sd=stdev(rois); return sd ? mean(rois)/sd : 0; }                          // #18 per-trade Sharpe
+function sortino(rois){ const d=rois.filter(r=>r<0); if(!d.length) return rois.length? Infinity:0; const dd=Math.sqrt(mean(d.map(x=>x*x))); return dd ? mean(rois)/dd : 0; } // #18
+function profitFactor(pnls){ const w=pnls.filter(p=>p>0).reduce((a,b)=>a+b,0); const l=Math.abs(pnls.filter(p=>p<0).reduce((a,b)=>a+b,0)); return l ? w/l : (w>0?Infinity:0); } // #18
+function losingStreak(closedAsc){ let best=0,cur=0; closedAsc.forEach(c=>{ if(c.pnl<=0){cur++; best=Math.max(best,cur);} else cur=0; }); return best; } // #18
+function linfit(pts){ const n=pts.length; if(n<2) return null; const sx=mean(pts.map(p=>p.x)),sy=mean(pts.map(p=>p.y)); let num=0,den=0; pts.forEach(p=>{num+=(p.x-sx)*(p.y-sy);den+=(p.x-sx)**2;}); const m=den?num/den:0,b=sy-m*sx; const ssTot=pts.reduce((a,p)=>a+(p.y-sy)**2,0); const ssRes=pts.reduce((a,p)=>a+(p.y-(m*p.x+b))**2,0); const r2=ssTot?1-ssRes/ssTot:0; return {m,b,r2}; } // #19
+function brier(preds){ return preds.length ? mean(preds.map(x=>(x.p-x.outcome)**2)) : null; } // #17
+
+/* ---- microstructure (book + tape) — #6-#11 ---- */
+function microprice(bid,ask,bs,as){ const d=bs+as; return d ? (bid*as + ask*bs)/d : (bid+ask)/2; } // #10
+function walkLadder(levels, shares){ let need=shares, cost=0, filled=0; for(const l of levels){ if(need<=0) break; const take=Math.min(need,l.size); cost+=take*l.price; filled+=take; need-=take; } return { avg: filled?cost/filled:0, filled, cleared: need<=0 }; } // #7
+function liqWithin(levels, ref, band){ return (levels||[]).filter(l=>Math.abs(l.price-ref)<=band).reduce((a,l)=>a+l.size,0); } // #8
+function tapeVwap(trades){ let v=0,pv=0; (trades||[]).forEach(t=>{ const s=t.size||0; v+=s; pv+=t.price*(s||1); v+=s?0:1; }); return v? pv/v : ((trades||[])[0]?.price||0); } // #11
+function buyShare(trades){ let b=0,s=0; (trades||[]).forEach(t=>{ const sz=t.size||1; if(t.side==='BUY')b+=sz; else if(t.side==='SELL')s+=sz; }); const t=b+s; return t? b/t : 0.5; } // #11
+function liveMetrics(sub){
+  const bids=sub.bids||[], asks=sub.asks||[];
+  const bb=sub.best_bid, ba=sub.best_ask;
+  const bSz=bids[0]?.size||0, aSz=asks[0]?.size||0;
+  const spread = (bb&&ba) ? ba-bb : null;
+  const mid = sub.mid || ((bb&&ba)?(bb+ba)/2:null);
+  const micro = (bb&&ba) ? microprice(bb,ba,bSz,aSz) : null;          // #10
+  const probe = (cfg().probeShares)||500;
+  const fill = walkLadder(asks, probe);                               // #7 cost to BUY probe shares
+  const slip = (fill.filled && ba) ? fill.avg-ba : null;
+  const band = cfg().slipBand||0.03;
+  const liqBid = liqWithin(bids, mid||bb||0, band), liqAsk = liqWithin(asks, mid||ba||0, band); // #8
+  const totBid=bids.reduce((a,l)=>a+l.size,0), totAsk=asks.reduce((a,l)=>a+l.size,0);
+  const imb = (totBid+totAsk)? (totBid-totAsk)/(totBid+totAsk) : 0;   // #9
+  if(!sub.imbHist) sub.imbHist=[]; const lastImb=sub.imbHist[sub.imbHist.length-1];
+  if(lastImb===undefined || Math.abs(lastImb-imb)>0.005){ sub.imbHist.push(imb); if(sub.imbHist.length>60) sub.imbHist.shift(); } // #9 trend
+  const tr=sub.trades||[];
+  const vw=tapeVwap(tr), bShare=buyShare(tr);                         // #11
+  const dt = tr.length>1 ? (tr[0].t - tr[tr.length-1].t)/1000 : 0;
+  const tradesPerMin = (tr.length>1 && dt>0) ? tr.length/(dt/60) : 0; // #11
+  return { spread, spreadPct: (spread&&mid)? spread/mid : null, mid, micro, fill, slip, probe,
+           liqBid, liqAsk, imb, vw, bShare, tradesPerMin };
+}
+function sparkline(arr, w=72, h=18){
+  if(!arr || arr.length<2) return '<svg width="'+w+'" height="'+h+'"></svg>';
+  const lo=Math.min(...arr), hi=Math.max(...arr), rng=(hi-lo)||1;
+  const pts=arr.map((v,i)=>`${(i/(arr.length-1)*w).toFixed(1)},${(h-((v-lo)/rng)*h).toFixed(1)}`).join(' ');
+  const up=arr[arr.length-1]>=arr[0];
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${up?'#22c55e':'#ef4444'}" stroke-width="1.5"/></svg>`;
+}
+
+/* ---- fee / cost-adjusted EV — #15 ---- */
+function feeFrac(){ return Math.max(0, (cfg().feeBps||0)/10000); }
+
+/* ---- correlation / cluster risk + portfolio heat — #12, #13, #16 ---- */
+function clusterExposure(){ // #12
+  const by={}; let total=0;
+  state.positions.forEach(p=>{ const c=p.cluster||'Uncategorized'; by[c]=(by[c]||0)+(p.stake||0); total+=p.stake||0; });
+  return { by, total };
+}
+function portfolioHeat(){ // #13
+  const total = state.positions.reduce((a,p)=>a+(p.stake||0),0);
+  const bank = state.bankroll||0;
+  const pct = bank ? total/bank*100 : 0;
+  const budget = cfg().riskBudgetPct||60;
+  return { total, bank, pct, budget, over: pct>budget };
+}
+function daysTo(ts){ if(!ts) return null; return Math.round((ts - Date.now())/86400000); } // #5/#16
+
+/* ---- simultaneous (multi-bet) Kelly haircut — #14 ---- */
+function concurrentKellyScale(){ // shrink size as # of live concurrent bets rises (correlation-agnostic guard)
+  const n = state.positions.length;
+  return n<=1 ? 1 : 1/Math.sqrt(n);
+}
+
+/* ---- empirical bootstrap projection from YOUR real trades — #20 ---- */
+function bootstrapProjection(nTrades=200, sims=500){
+  const rois = state.closed.map(c=> c.stake ? c.pnl/c.stake : 0).filter(Number.isFinite);
+  if(rois.length<5) return null;
+  const bank0 = state.bankroll||10000;
+  const avgFrac = mean(state.closed.map(c=> (c.stake||0)/(bank0||1)).filter(Number.isFinite)) || 0.05;
+  const ends=[]; let ruin=0;
+  for(let s=0;s<sims;s++){
+    let bal=bank0;
+    for(let t=0;t<nTrades;t++){
+      const r = rois[Math.floor(rngIdx(s,t,rois.length))]; // deterministic-ish pseudo-sample
+      bal += bal*avgFrac*r;
+      if(bal < bank0*0.05){ bal=0; break; }
+    }
+    if(bal===0) ruin++;
+    ends.push(bal);
+  }
+  ends.sort((a,b)=>a-b);
+  return { med:ends[Math.floor(ends.length/2)], p5:ends[Math.floor(ends.length*0.05)], p95:ends[Math.floor(ends.length*0.95)],
+           ruin: ruin/sims*100, n:rois.length, avgFrac };
+}
+// Math.random is unavailable to keep things reproducible-safe in some harnesses; use a cheap LCG-ish index
+let _seed = 0x2545F491;
+function rngIdx(a,b,mod){ _seed = (_seed*1103515245 + 12345 + a*7 + b*13) & 0x7fffffff; return (_seed/0x7fffffff)*mod; }
+
+/* ---- discovery: live Polymarket market list (Gamma API) — #1, #2 ---- */
+let _marketCache = null;
+async function loadMarkets(force){
+  if(_marketCache && !force) return _marketCache;
+  const raw = await safeJson('https://gamma-api.polymarket.com/markets?closed=false&active=true&limit=200&order=volume24hr&ascending=false');
+  if(!Array.isArray(raw)) return null;
+  _marketCache = raw.map(m=>{
+    let toks=[]; try{ toks=JSON.parse(m.clobTokenIds||'[]'); }catch{}
+    let px=[];  try{ px=JSON.parse(m.outcomePrices||'[]').map(Number); }catch{}
+    return { q:m.question||'(untitled)', tokens:toks, yes:finite(px[0]), no:finite(px[1]),
+             vol:finite(m.volume)||finite(m.volume24hr)||0, end:m.endDate?Date.parse(m.endDate):null,
+             spread:finite(m.spread) };
+  }).filter(m=>m.q);
+  return _marketCache;
+}
+
+/* ---- free arbitrage check (YES-ask + NO-ask < $1) — #4 ---- */
+async function arbCheck(tokenYes, tokenNo){
+  const [by,bn] = await Promise.all([
+    safeJson('https://clob.polymarket.com/book?token_id='+encodeURIComponent(tokenYes)),
+    safeJson('https://clob.polymarket.com/book?token_id='+encodeURIComponent(tokenNo))
+  ]);
+  if(!by || !bn) return { ok:false, reason:'could not fetch one or both books (network/CORS)' };
+  const askY = finite((by.asks||[]).map(a=>Number(a.price)).filter(Number.isFinite).sort((a,b)=>a-b)[0]);
+  const askN = finite((bn.asks||[]).map(a=>Number(a.price)).filter(Number.isFinite).sort((a,b)=>a-b)[0]);
+  const bidY = finite((by.bids||[]).map(a=>Number(a.price)).filter(Number.isFinite).sort((a,b)=>b-a)[0]);
+  const bidN = finite((bn.bids||[]).map(a=>Number(a.price)).filter(Number.isFinite).sort((a,b)=>b-a)[0]);
+  const buyBoth  = (askY!=null && askN!=null) ? askY+askN : null;       // <1 → lock profit by buying both
+  const sellBoth = (bidY!=null && bidN!=null) ? bidY+bidN : null;       // >1 → lock profit by selling both
+  return { ok:true, askY, askN, bidY, bidN, buyBoth, sellBoth,
+           buyEdge: buyBoth!=null ? 1-buyBoth : null, sellEdge: sellBoth!=null ? sellBoth-1 : null };
+}
+
 /* ------------------------------ INIT ------------------------------ */
 showTab('dashboard');
 renderDashboard();
@@ -1039,10 +1405,12 @@ setWsStatus('idle','idle');
 setInterval(()=>{
   let dirty=false;
   state.positions.forEach(p=>{
-    const m = /tok:([A-Za-z0-9]+)/.exec(p.reason||'');
-    if (!m) return;
-    const sub = state.live.find(x=>x.tokenId===m[1]);
-    if (sub && sub.mid){ p.price = sub.mid; dirty=true; }
+    // CYCLE 2 [FEATURE] (2026-05-29): sync via explicit tokenId field, falling back to legacy "tok:<id>" in reason
+    let id = p.tokenId;
+    if (!id){ const m = /tok:([A-Za-z0-9]+)/.exec(p.reason||''); if (m) id = m[1]; }
+    if (!id) return;
+    const sub = state.live.find(x=>x.tokenId===id);
+    if (sub && Number.isFinite(sub.mid)){ p.price = sub.mid; dirty=true; }
   });
   if (dirty){ save(); renderPortfolio(); renderDashboard(); }
 }, 4000);
