@@ -69,3 +69,14 @@ node index.js                          # 7. LIVE. Starts at $5/trade.
 - **Resolution/fee/gas risk** eats thin edges — hence the buffer. A "1¢ edge" can be ~0 net.
 - **No profit is guaranteed.** This is a tool, not a money printer. Start in paper mode,
   start tiny, and only scale what you've verified with your own eyes.
+
+## Run it 24/7 / reboot-proof (macOS LaunchAgent)
+Already installed on this machine. To reinstall on another Mac:
+```bash
+cp bot/com.polymarket.arbbot.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.polymarket.arbbot.plist   # starts now + every login
+launchctl unload ~/Library/LaunchAgents/com.polymarket.arbbot.plist # to stop permanently
+```
+The agent runs `caffeinate -dsi bash run.sh` → keeps the Mac awake, supervises the bot
+(auto-restart on crash), and starts automatically at login. Survives reboots, closed
+terminals, and a closed Claude. Logs to /tmp/pmbot.log. Paper-default; live still triple-gated.
