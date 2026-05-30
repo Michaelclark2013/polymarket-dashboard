@@ -12,7 +12,7 @@
  * ========================================================================== */
 const fs = require('fs');
 const cfg = require('./config');
-const { getBinaryMarkets, getNegRiskEvents, findBinaryArbs, findMultiArbs, buildArb } = require('./lib');
+const { getBinaryMarkets, getNegRiskEvents, findBinaryArbs, findMultiArbs, buildArb, getBook } = require('./lib');
 const { LiveFeed } = require('./feed');
 const { pollFollowed } = require('./copy');
 const { scoreAll } = require('./learn');
@@ -43,7 +43,7 @@ function startMonitor(){
         ws: STATUS.feed ? (STATUS.feed.connected?'live':'reconnecting') : 'rest',
         books: STATUS.feed ? STATUS.feed.bookCount() : 0, groups: STATUS.groups(),
         wallets: cfg.FOLLOW_WALLETS.length, trades: s.trades||0, open: (s.open||[]).length,
-        exposure: exposure(s), dailyPnl: s.dailyRealized||0,
+        exposure: exposure(s), dailyPnl: s.dailyRealized||0, realized: s.realizedTotal||0, copyFracMult: s.copyFracMult||1,
         caps: { perTrade: cfg.MAX_PER_TRADE_USD, exposure: cfg.MAX_EXPOSURE_USD, dailyKill: cfg.DAILY_LOSS_KILL_USD, maxOpen: cfg.MAX_OPEN_POSITIONS },
         positions: (s.open||[]).map(p=>({ market:p.market, kind:p.kind, cost:p.cost, pairs:p.pairs, locked:p.lockedProfit||0, source:p.source||'', when:p.openedAt })),
         scores: Object.entries(s.walletScores||{}).map(([w,v])=>({ w, winRate:v.winRate, pnl:v.pnl, n:v.n, weight:v.weight })).sort((a,b)=>b.weight-a.weight),
@@ -82,6 +82,7 @@ async function tick(){ try{
     kpi('WS FEED',s.ws.toUpperCase(),s.ws==='live'?'g':'a')+kpi('BOOKS',s.books,'c')+kpi('GROUPS',s.groups)+
     kpi('FOLLOWING',s.wallets+' wallets')+kpi('OPEN',s.open+' / '+s.caps.maxOpen)+
     kpi('EXPOSURE',$(s.exposure)+' / '+$(s.caps.exposure),'a')+kpi('TRADES',s.trades)+
+    kpi('REALIZED P/L',$(s.realized),s.realized>=0?'g':'r')+kpi('SIZE DIAL',(s.copyFracMult||1).toFixed(2)+'×','c')+
     kpi('DAILY P/L',$(s.dailyPnl),s.dailyPnl>=0?'g':'r');
   if(s.positions.length){ let h='<table><tr><th>market</th><th>kind</th><th>cost</th><th>locked</th><th>source</th></tr>';
     for(const p of s.positions) h+='<tr><td>'+(p.market||'').slice(0,52)+'</td><td>'+p.kind+'</td><td>'+$(p.cost)+'</td><td>'+(p.locked?$(p.locked):'-')+'</td><td>'+(p.source||'').slice(0,12)+'</td></tr>';
@@ -223,31 +224,83 @@ async function runWithFeed(){
 }
 
 /* ---- CYCLE [BOT] T1-#2 (2026-05-30): smart-money copy — mirror followed wallets' new buys ---- */
+// CYCLE [BOT] (2026-05-30): closed-loop — effective copy weight blends the wallet's own track
+// record (learn.js) with HOW OUR copies of it have actually performed (paper realized).
+function copyWeight(s, wallet){
+  const sc = (s.walletScores||{})[wallet];
+  let w = sc ? sc.weight : cfg.COPY_UNSCORED_WEIGHT;
+  const cs = (s.copyStats||{})[wallet];
+  if (cs && cs.n >= 3){
+    if (cs.realized < 0) return 0;                         // our copies of this wallet LOSE → stop copying it
+    w *= clamp(1 + cs.realized/Math.max(1, cs.cost||1), 0.5, 1.5); // tilt by our realized ROI on it
+  }
+  return clamp(w, 0, 1.5);
+}
 async function mirrorCopy(sig){
   const s = loadState();
   if (s.killed) return;
   if (s.open.length >= cfg.MAX_OPEN_POSITIONS) return log('[copy] max open reached — skip.');
-  // SELF-LEARNING: scale by the wallet's learned quality weight; skip wallets that aren't winning
-  const sc = (s.walletScores||{})[sig.wallet];
-  const weight = sc ? sc.weight : cfg.COPY_UNSCORED_WEIGHT;
-  if (weight <= 0){ return log(`[copy] skip ${sig.wallet.slice(0,10)} — learned weight 0 (not profitable).`); }
-  // size down: a fraction of the whale's USDC × learned weight, clamped to the per-trade cap and exposure room
+  const weight = copyWeight(s, sig.wallet);
+  if (weight <= 0){ return log(`[copy] skip ${sig.wallet.slice(0,10)} — weight 0 (their record or our copies of them losing).`); }
+  const fracMult = clamp(s.copyFracMult || 1, 0.5, 2);    // auto-tuned global sizing dial (#3)
   const room = Math.max(0, cfg.MAX_EXPOSURE_USD - exposure(s));
-  const usdcTarget = Math.min(sig.usdc * cfg.COPY_FRACTION * weight, cfg.MAX_PER_TRADE_USD, room);
-  if (usdcTarget < 0.5) return; // too small to bother
+  const usdcTarget = Math.min(sig.usdc * cfg.COPY_FRACTION * weight * fracMult, cfg.MAX_PER_TRADE_USD, room);
+  if (usdcTarget < 0.5) return;
   const shares = sig.price>0 ? usdcTarget/sig.price : 0;
   if (shares < 1) return;
   const cost = shares*sig.price;
   const tag = cfg.LIVE ? 'LIVE' : 'PAPER';
-  log(`${tag} COPY ← ${sig.wallet.slice(0,10)} bought "${(sig.title||'').slice(0,40)}" ${sig.outcome} @${sig.price} | mirror ${Math.round(shares)} sh ($${cost.toFixed(2)})`);
+  log(`${tag} COPY ← ${sig.wallet.slice(0,10)} BUY "${(sig.title||'').slice(0,38)}" ${sig.outcome} @${sig.price} | ${Math.round(shares)} sh ($${cost.toFixed(2)}) w${weight.toFixed(2)}×${fracMult.toFixed(2)}`);
   try {
-    const fill = await buyLeg(sig.token, sig.price, shares); // paper: records; live: signs+posts (gated)
-    s.open.push({ market: `COPY:${sig.title}`, kind:'copy', source: sig.wallet, legs:[{token:sig.token,label:sig.outcome,price:sig.price}],
-                  pairs: Math.round(shares), cost, lockedProfit: 0, openedAt: Date.now(), mode: tag, fills:[fill] });
+    const fill = await buyLeg(sig.token, sig.price, shares);
+    s.open.push({ market: `COPY:${sig.title}`, kind:'copy', source: sig.wallet, token: sig.token,
+                  legs:[{token:sig.token,label:sig.outcome,price:sig.price}], entry: sig.price,
+                  pairs: Math.round(shares), shares: Math.round(shares), cost, lockedProfit: 0, openedAt: Date.now(), mode: tag, fills:[fill] });
     s.trades++; saveState(s);
     log(`${tag} copy filled. open=${s.open.length} exposure=${usd(exposure(s))}`);
   } catch(e){ log(`[copy] execution error: ${e.message}`); s.killed=true; saveState(s); }
 }
+// EXIT (#1): realize a paper position at a given exit price, attribute result to its source wallet (closed loop)
+function closeCopy(s, pos, exitPx, reason){
+  const shares = pos.shares || pos.pairs || 0;
+  const pnl = (exitPx - pos.entry) * shares;             // long a single outcome
+  s.realizedTotal = (s.realizedTotal||0) + pnl;
+  s.dailyRealized = (s.dailyRealized||0) + pnl;
+  if (pos.source){
+    s.copyStats = s.copyStats || {};
+    const cs = s.copyStats[pos.source] = s.copyStats[pos.source] || { realized:0, cost:0, n:0, wins:0 };
+    cs.realized += pnl; cs.cost += pos.cost||0; cs.n++; if (pnl>0) cs.wins++;
+  }
+  // auto-tune the global sizing dial from the rolling result (#3)
+  s.copyFracMult = clamp((s.copyFracMult||1) + (pnl>0 ? 0.05 : -0.08), 0.5, 2);
+  s.open = s.open.filter(x => x !== pos);
+  log(`${cfg.LIVE?'LIVE':'PAPER'} EXIT copy "${(pos.market||'').slice(0,38)}" @${exitPx.toFixed(3)} (${reason}) → P/L ${usd(pnl)} | realized ${usd(s.realizedTotal)}`);
+}
+// mirror whale exits + take-profit/stop on open copy positions
+async function manageOpen(){
+  const s = loadState(); if (s.killed) return;
+  const copies = (s.open||[]).filter(p => p.kind === 'copy');
+  if (!copies.length) return;
+  let changed = false;
+  for (const p of copies){
+    const b = await getBook(p.token);
+    const bid = b && b.bids[0] ? b.bids[0].price : null;
+    if (bid == null) continue;
+    const roi = p.entry>0 ? (bid - p.entry)/p.entry : 0;
+    if (roi >= cfg.COPY_TP_PCT){ closeCopy(s, p, bid, `take-profit +${(roi*100).toFixed(0)}%`); changed = true; }
+    else if (roi <= -cfg.COPY_STOP_PCT){ closeCopy(s, p, bid, `stop ${(roi*100).toFixed(0)}%`); changed = true; }
+  }
+  if (changed) saveState(s);
+}
+// a followed wallet SOLD → exit our matching copy of theirs
+function onWhaleSell(sig){
+  const s = loadState(); if (s.killed) return;
+  const pos = (s.open||[]).find(p => p.kind==='copy' && p.source===sig.wallet && p.token===sig.token);
+  if (!pos) return;
+  closeCopy(s, pos, sig.price, `mirrored ${sig.wallet.slice(0,8)} exit`); saveState(s);
+}
+function onCopySignal(sig){ return sig.side === 'SELL' ? onWhaleSell(sig) : mirrorCopy(sig); }
+function startManageLoop(){ const t=()=>manageOpen().catch(e=>log('[manage] '+e.message)); t(); setInterval(t, cfg.MANAGE_MS); }
 function startCopyLoop(){
   if (!cfg.FOLLOW_WALLETS.length){ log('[copy] no FOLLOW_WALLETS set — add sharp wallets (from the dashboard Smart $ tab) to enable smart-money copy.'); return; }
   log(`[copy] following ${cfg.FOLLOW_WALLETS.length} wallet(s) · mirror ${(cfg.COPY_FRACTION*100).toFixed(1)}% of their size (capped $${cfg.MAX_PER_TRADE_USD}) · min $${cfg.COPY_MIN_USDC}`);
@@ -255,7 +308,7 @@ function startCopyLoop(){
     try {
       const s = loadState(); if (s.killed) return;
       if (cfg.LIVE && !(await ensureLiveReady(s))) return;
-      const r = await pollFollowed(sig => mirrorCopy(sig).catch(e=>log('[copy] '+e.message)));
+      const r = await pollFollowed(sig => { try { onCopySignal(sig); } catch(e){ log('[copy] '+e.message); } });
       if (r.newSignals) log(`[copy] ${r.newSignals} new signal(s) from ${r.followed} wallet(s)`);
     } catch(e){ log('[copy] poll error: '+e.message); }
   };
@@ -292,4 +345,5 @@ function startLearnLoop(){
     await scan(); setInterval(()=>{ scan().catch(e=>log('scan error: '+e.message)); }, cfg.POLL_MS); }
   startCopyLoop(); // smart-money copy runs alongside arb detection
   startLearnLoop(); // self-learning: re-score followed wallets, auto-curate who to copy
+  startManageLoop(); // exit logic: mirror whale exits + take-profit/stop, realize P&L (closed loop)
 })();

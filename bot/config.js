@@ -40,6 +40,10 @@ const config = {
   DATA_API_URL:  process.env.DATA_API_URL || 'https://data-api.polymarket.com',
   SCORE_INTERVAL_MS: num(process.env.SCORE_INTERVAL_MS, 1800000), // re-score followed wallets every 30m (self-learning)
   COPY_UNSCORED_WEIGHT: num(process.env.COPY_UNSCORED_WEIGHT, 0.4), // cautious size for not-yet-scored wallets
+  // exit logic for copy positions (mirror whale exits + TP/stop)
+  COPY_TP_PCT:   num(process.env.COPY_TP_PCT, 0.25),    // take profit at +25% mark-to-market
+  COPY_STOP_PCT: num(process.env.COPY_STOP_PCT, 0.40),  // stop loss at -40% mark-to-market
+  MANAGE_MS:     num(process.env.MANAGE_MS, 15000),     // how often to mark-to-market + apply exits
 
   // --- live wallet (only read when going live) ---
   PRIVATE_KEY: process.env.PRIVATE_KEY || '',

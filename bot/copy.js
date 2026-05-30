@@ -25,8 +25,8 @@ async function pollFollowed(onCopy){
   for (const w of wallets){
     const acts = await safeJson(`${cfg.DATA_API_URL}/activity?user=${encodeURIComponent(w)}&limit=40`);
     if (!Array.isArray(acts)) continue;
-    const trades = acts.filter(a => a.type === 'TRADE' && a.side === 'BUY' && a.asset)
-                       .map(a => ({ ts: fin(a.timestamp)||0, token: a.asset, price: fin(a.price), shares: fin(a.size),
+    const trades = acts.filter(a => a.type === 'TRADE' && (a.side === 'BUY' || a.side === 'SELL') && a.asset)
+                       .map(a => ({ ts: fin(a.timestamp)||0, side: a.side, token: a.asset, price: fin(a.price), shares: fin(a.size),
                                     usdc: fin(a.usdcSize), title: a.title||'', outcome: a.outcome||'', conditionId: a.conditionId||'' }))
                        .filter(t => t.price!=null && t.shares!=null)
                        .sort((a,b)=>a.ts-b.ts);
@@ -35,7 +35,7 @@ async function pollFollowed(onCopy){
     if (hw === undefined){ lastSeen.set(w, maxTs); continue; } // first sight: set mark, don't backfill
     for (const t of trades){
       if (t.ts <= hw) continue;                              // already seen
-      if ((t.usdc||0) < cfg.COPY_MIN_USDC) continue;         // ignore dust
+      if (t.side === 'BUY' && (t.usdc||0) < cfg.COPY_MIN_USDC) continue; // ignore dust buys (sells always emitted → can mirror exits)
       newSignals++;
       onCopy({ wallet: w, ...t });
     }
