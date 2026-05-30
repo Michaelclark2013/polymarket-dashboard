@@ -92,3 +92,19 @@ to BACKLOG.md (logical/combinatorial arb checker; smart-money wallet tracker; bo
 outcome arb + focus polling; auto Kalshi ref; alert engine). No code changes this phase.
 Next phase: BUILD (scheduled ~25m). Note: dashboard cycle-2 still NOT live (Vercel stuck —
 see DEPLOY_LOG.md); resolve before next deploy window.
+
+## Growth Loop — BUILD cycle 1 — 2026-05-30 (commit a997338)
+Shipped 3 flagship money features (gated: dash node --check + preview smoke w/ zero console
+errors; bot node --check + paper scan placing nothing, no secrets):
+- [DASH] Combinatorial arb scan — neg-risk mutually-exclusive events, Σ<$1 buy-all only.
+  Smoke test CAUGHT a real bug: independent multi-market groups (e.g. "insult N people")
+  were summing to 30+¢ and showing as arbs → fixed to require negRisk strictly. Verified live:
+  returns 4 genuine Σ0.91–0.97 baskets, no noise.
+- [DASH] Smart-money wallet inspector — pivoted from leaderboard (no public API; all 404) to
+  Polymarket Data API value/positions/activity. Verified live ($719k sample wallet, 30 rows).
+- [BOT] Multi-outcome buy-all arb (paper-only) — same neg-risk safety filter (critical: stops
+  independent outcomes being mistaken for a guaranteed basket). Scans binary + neg-risk events.
+Deferred to next BUILD: #4 Kalshi ref, #5 alert engine (+ new #6 /holders, #7 executability).
+DEPLOY: still STUCK on Vercel "Building…" (3rd attempt) even with static vercel.json — this is
+a project/account-side issue needing manual attention (relink/recreate or fix dashboard build
+settings). Code is committed + verified locally; NOT live. Loop continues per user instruction.

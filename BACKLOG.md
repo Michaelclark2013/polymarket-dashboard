@@ -1,6 +1,23 @@
 # Backlog — Self-Evolution Loop
 
-## ACTIVE SPRINT — Growth Cycle 1 (DISCOVER 2026-05-29)
+## ACTIVE SPRINT — carry-over to next BUILD (from Cycle 1)
+4. **[DASH] Auto cross-venue (Kalshi) reference for the REF column.** (deferred — Kalshi CORS
+   risk; build with graceful fallback + manual override.)
+5. **[DASH] Alert engine** (edge/arb/combinatorial/smart-money triggers → toast + log).
+   Plus NEW from this cycle:
+6. **[DASH] "Smart money in THIS market" via /holders?market=<conditionId>** — top holders per
+   outcome (extends the wallet inspector; needs conditionId from gamma).
+7. **[DASH/BOT] Combinatorial executability check** — fetch real best-asks for a Σ<$1 basket
+   before flagging (current scan uses indicative last/mid; verify book to avoid illiquid traps).
+
+## SHIPPED — Growth Cycle 1 BUILD (2026-05-30) — commit a997338
+- #1 [DASH] Combinatorial arb scan (neg-risk/mutually-exclusive only; Σ<$1 buy-all signals;
+  verified live vs Gamma; false-positive independent-market bug caught & fixed in smoke test).
+- #2 [DASH] Smart-money wallet inspector (Polymarket Data API: value/positions/activity;
+  pivoted from leaderboard which has no public API; no fabricated fields).
+- #3 [BOT] Multi-outcome buy-all arb (paper-only; safety-critical neg-risk filter; caps intact).
+
+## ARCHIVE — Growth Cycle 1 (DISCOVER 2026-05-29)
 Research basis: combinatorial/logical arb edges persist far longer than single-market arb
 (median 3.6s and <200ms windows → bot-only); 7,000+ markets show measurable combinatorial
 mispricing; $40M extracted Apr'24–Apr'25. Smart-money wallet tracking is well-supported by
