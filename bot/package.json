@@ -20,5 +20,8 @@
     "@polymarket/clob-client": "^4.22.8",
     "dotenv": "^16.6.1",
     "ethers": "^5.8.0"
+  },
+  "dependencies": {
+    "ws": "^8.21.0"
   }
 }

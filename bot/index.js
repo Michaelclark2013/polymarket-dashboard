@@ -12,7 +12,8 @@
  * ========================================================================== */
 const fs = require('fs');
 const cfg = require('./config');
-const { getBinaryMarkets, getNegRiskEvents, findBinaryArbs, findMultiArbs } = require('./lib');
+const { getBinaryMarkets, getNegRiskEvents, findBinaryArbs, findMultiArbs, buildArb } = require('./lib');
+const { LiveFeed } = require('./feed');
 
 const STATE_FILE = __dirname + '/state.json';
 const todayKey = () => new Date().toISOString().slice(0,10); // UTC day
@@ -112,6 +113,45 @@ async function scan(){
   }
 }
 
+/* ---- CYCLE [BOT] (2026-05-30): T2-#4 event-driven detection over the live WS feed ---- */
+async function runWithFeed(){
+  const feed = new LiveFeed(log);
+  let groups = [], tokenGroups = new Map();
+  const lastActed = new Map(); // market → ts, simple cooldown to avoid re-firing the same arb every tick
+  async function refreshGroups(){
+    const markets = await getBinaryMarkets(cfg.MARKET_SCAN_LIMIT) || [];
+    const events  = await getNegRiskEvents(Math.min(60, cfg.MARKET_SCAN_LIMIT)) || [];
+    groups = [
+      ...markets.map(m=>({ kind:'binary', q:m.q, legs:[{token:m.yes,label:'YES'},{token:m.no,label:'NO'}] })),
+      ...events.map(e=>({ kind:'multi', q:e.q, legs:e.legs.map(l=>({token:l.token,label:l.label})) }))
+    ];
+    tokenGroups = new Map();
+    for (const g of groups) for (const l of g.legs){ const a = tokenGroups.get(l.token)||[]; a.push(g); tokenGroups.set(l.token, a); }
+    feed.setAssets([...tokenGroups.keys()]);
+    feed.resubscribe();
+  }
+  feed.onUpdate = async (token) => {
+    const gs = tokenGroups.get(token); if (!gs) return;
+    for (const g of gs){
+      if (Date.now() - (lastActed.get(g.q)||0) < 30000) continue; // 30s cooldown per market
+      const legBooks = g.legs.map(l=>({ token:l.token, label:l.label, book: feed.getBook(l.token) }));
+      const arb = buildArb(g.kind, g.q, legBooks);
+      if (!arb) continue;
+      lastActed.set(g.q, Date.now());
+      const s = loadState();
+      if (s.killed) return;
+      if (s.dailyRealized <= -cfg.DAILY_LOSS_KILL_USD){ s.killed=true; saveState(s); log(`Daily loss kill hit. Stopping.`); return; }
+      if (cfg.LIVE && !(await ensureLiveReady(s))) return;
+      await executeArb(arb, s);
+    }
+  };
+  await refreshGroups();
+  if (!feed.connect()) return false;            // ws unavailable → caller falls back to REST
+  setInterval(()=>refreshGroups().catch(e=>log('refresh error: '+e.message)), 60000);
+  setInterval(()=>{ const s=loadState(); log(`[ws] ${feed.connected?'live':'reconnecting'} · ${feed.bookCount()} books · ${groups.length} groups · open ${s.open.length} · exposure ${usd(exposure(s))} · dailyP/L ${usd(s.dailyRealized)}`); }, 15000);
+  return true;
+}
+
 (async function main(){
   log('='.repeat(70));
   log(`Polymarket free-arb bot starting — MODE: ${cfg.LIVE ? '*** LIVE (REAL MONEY) ***' : 'PAPER (dry-run, no orders placed)'}`);
@@ -119,7 +159,9 @@ async function scan(){
   if (!cfg.DRY_RUN && !cfg.LIVE) log('WARNING: DRY_RUN=false but live not fully authorized (need CONFIRM_LIVE=I_UNDERSTAND + PRIVATE_KEY). Staying in PAPER mode.');
   log('='.repeat(70));
 
-  await scan();
-  if (cfg.ONCE){ log('ONCE=true → done.'); return; }
-  setInterval(()=>{ scan().catch(e=>log('scan error: '+e.message)); }, cfg.POLL_MS);
+  if (cfg.ONCE){ await scan(); log('ONCE=true → done.'); return; } // one-shot uses REST scan
+  const feedOn = new LiveFeed().available();
+  if (feedOn){ log('detection: live WebSocket feed (event-driven).'); await runWithFeed(); }
+  else { log('detection: REST polling fallback (install ws for the live feed: cd bot && npm i ws).');
+    await scan(); setInterval(()=>{ scan().catch(e=>log('scan error: '+e.message)); }, cfg.POLL_MS); }
 })();

@@ -95,4 +95,4 @@ async function findMultiArbs(events){
   return arbs;
 }
 
-module.exports = { safeJson, getBinaryMarkets, getNegRiskEvents, getBook, walk, findBinaryArbs, findMultiArbs };
+module.exports = { safeJson, getBinaryMarkets, getNegRiskEvents, getBook, walk, buildArb, findBinaryArbs, findMultiArbs };

@@ -10,8 +10,8 @@
 
 ## BOT "MOST-SUCCESSFUL" BUILDOUT TRACK (follow BOT_BUILDOUT.md — strict priority order)
 Build latency-tolerant edges + execution quality; paper-first; loop never enables live.
-- T2-#4 [BOT] Live WebSocket order feed (replace 15s REST polling; react on-change)  ← NEXT
-- T1-#1 [BOT] Combinatorial multi-leg paper executor (buy neg-risk basket when Σ best-asks<$1) ← NEXT
+- T2-#4 [BOT] Live WebSocket order feed — DONE (feed.js; event-driven; REST fallback; 86 assets live)
+- T1-#1 [BOT] Combinatorial multi-leg paper executor — DONE (buildArb + executeArb fire on WS book updates) ← NEXT: T1-#2
 - T1-#2 [BOT] Smart-money copy (watch sharp wallets via activity API; mirror new positions, sized down)
 - T1-#3 [BOT] Cross-venue arb (Polymarket vs Kalshi/sportsbooks matching layer)
 - T2-#5 [BOT] Maker-side + liquidity rewards (post resting orders where EV flips positive)
