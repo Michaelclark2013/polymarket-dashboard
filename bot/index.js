@@ -42,11 +42,21 @@ function startMonitor(){
   http.createServer((req,res)=>{
     if (req.url === '/status'){
       const s = loadState();
+      // real derived metrics from actual closed paper trades (NO fabrication)
+      const cl = s.closedLog || []; const cpnls = cl.map(x=>x.pnl);
+      const cwins = cpnls.filter(p=>p>0).length;
+      const winRate = cpnls.length ? cwins/cpnls.length : null;
+      const m = cpnls.length ? cpnls.reduce((a,b)=>a+b,0)/cpnls.length : 0;
+      const sd = cpnls.length>1 ? Math.sqrt(cpnls.reduce((a,b)=>a+(b-m)**2,0)/(cpnls.length-1)) : 0;
+      const sharpe = sd ? +(m/sd).toFixed(2) : null;
+      const bestWin = cpnls.length ? Math.max(...cpnls) : null;
+      let cum=0; const pnlSeries = cl.map(x=>{ cum+=x.pnl; return +cum.toFixed(2); });
       const body = JSON.stringify({
         mode: cfg.LIVE ? 'LIVE' : 'PAPER', killed: !!s.killed,
         ws: STATUS.feed ? (STATUS.feed.connected?'live':'reconnecting') : 'rest',
         books: STATUS.feed ? STATUS.feed.bookCount() : 0, groups: STATUS.groups(),
         wallets: (Array.isArray(s.activeWallets)&&s.activeWallets.length) ? s.activeWallets.length : cfg.FOLLOW_WALLETS.length, trades: s.trades||0, open: (s.open||[]).length,
+        closed: cl.length, winRate, sharpe, bestWin, pnlSeries: pnlSeries.slice(-80),
         exposure: exposure(s), dailyPnl: s.dailyRealized||0, realized: s.realizedTotal||0, copyFracMult: s.copyFracMult||1,
         caps: { perTrade: cfg.MAX_PER_TRADE_USD, exposure: cfg.MAX_EXPOSURE_USD, dailyKill: cfg.DAILY_LOSS_KILL_USD, maxOpen: cfg.MAX_OPEN_POSITIONS },
         positions: (s.open||[]).map(p=>({ market:p.market, kind:p.kind, cost:p.cost, pairs:p.pairs, locked:p.lockedProfit||0, source:p.source||'', when:p.openedAt })),
@@ -61,64 +71,103 @@ function startMonitor(){
 }
 const MONITOR_HTML = `<!doctype html><html><head><meta charset=utf-8><title>Bot Monitor</title>
 <meta name=viewport content="width=device-width,initial-scale=1"><style>
-body{background:#0a0a0b;color:#e4e4e7;font:13px ui-monospace,Menlo,monospace;margin:0;padding:16px}
-.row{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px}
-.card{background:#18181b;border:1px solid #27272a;border-radius:8px;padding:10px 14px;min-width:120px}
-.k{font-size:10px;color:#71717a;letter-spacing:.1em}.v{font-size:20px;font-weight:700;margin-top:2px}
-.g{color:#22c55e}.r{color:#ef4444}.a{color:#f59e0b}.c{color:#22d3ee}
-h1{font-size:14px;letter-spacing:.1em;color:#a1a1aa;margin:0 0 12px}
-pre{background:#000;border:1px solid #27272a;border-radius:8px;padding:10px;max-height:46vh;overflow:auto;white-space:pre-wrap;font-size:11px;color:#a1a1aa}
-table{width:100%;border-collapse:collapse;font-size:12px}td,th{text-align:left;padding:4px 8px;border-bottom:1px solid #27272a}
-.dot{display:inline-block;width:8px;height:8px;border-radius:9px;margin-right:6px}
+:root{--bg:#f3efe4;--ink:#0d0d0d;--grn:#138a3e;--red:#c0392b;--amb:#b8860b;--box:#fffdf7}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:12px ui-monospace,Menlo,monospace;margin:0;padding:10px}
+.bar{display:flex;align-items:center;gap:14px;border:2px solid var(--ink);background:var(--box);padding:8px 12px;margin-bottom:8px;flex-wrap:wrap}
+.bar .ttl{font-size:18px;font-weight:800;letter-spacing:.05em}.bar .sub{font-size:9px;color:#555;letter-spacing:.12em}
+.bar .tag{font-size:10px;letter-spacing:.16em;color:#333}.clock{margin-left:auto;font-size:15px;font-weight:800}
+.ribbon{display:flex;border:2px solid var(--ink);background:var(--ink);color:var(--box);margin-bottom:8px;flex-wrap:wrap}
+.ribbon div{padding:5px 12px;border-right:1px solid #444;font-size:10px;letter-spacing:.08em}
+.grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px}
+.box{border:2px solid var(--ink);background:var(--box);padding:10px 12px}
+.lbl{font-size:9px;letter-spacing:.13em;color:#666}.big{font-size:38px;font-weight:800;line-height:1.05}
+.kpis{display:flex;gap:16px;margin-top:8px;flex-wrap:wrap}.kpis .num{font-size:18px;font-weight:800}
+.g{color:var(--grn)}.r{color:var(--red)}.a{color:var(--amb)}
+.pills{display:flex;gap:6px;border:2px solid var(--ink);background:var(--box);padding:8px;margin-bottom:8px;flex-wrap:wrap}
+.pill{flex:1;min-width:88px;border:1px solid var(--ink);padding:6px 8px;font-size:10px;letter-spacing:.08em;background:#fff}
+.pill.on{background:#6c4ad6;color:#fff;border-color:#6c4ad6}.pill b{display:block;font-size:8px;color:#999}.pill.on b{color:#ddd}
+h2{font-size:11px;letter-spacing:.14em;border:2px solid var(--ink);background:var(--ink);color:var(--box);margin:0 0 6px;padding:5px 10px}
+table{width:100%;border-collapse:collapse;font-size:11px;background:var(--box)}
+td,th{text-align:left;padding:3px 8px;border-bottom:1px solid #e2ddcf}th{font-size:9px;letter-spacing:.08em;color:#555}
+pre{border:2px solid var(--ink);background:#0f0f0f;color:#9fe6b0;padding:8px;height:38vh;overflow:auto;white-space:pre-wrap;font-size:10px;margin:0}
+canvas{background:#fff;border:1px solid var(--ink)}
+.bot3{display:grid;grid-template-columns:1.1fr .9fr 1fr;gap:8px}
+.gauge{height:8px;background:#e2ddcf;border:1px solid var(--ink);margin-top:4px}.gauge>div{height:100%;background:var(--grn)}
+@media(max-width:760px){.grid,.bot3{grid-template-columns:1fr}}
 </style></head><body>
-<h1>🤖 POLYMARKET BOT — LIVE MONITOR <span id=dot class=dot></span><span id=mode></span></h1>
-<div class=row id=kpis></div>
-<div class=card style="display:block;width:100%;box-sizing:border-box">
-  <div class=k>📈 P(PROFIT · NEXT 24H) — Monte-Carlo over the bot's OWN realized paper trades</div>
-  <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:4px">
-    <div id=oddsbig class=v style="font-size:40px">—</div>
-    <div id=oddsmeta style="font-size:11px;color:#a1a1aa"></div>
-    <canvas id=oddschart width=520 height=70 style="flex:1;min-width:240px;background:#000;border:1px solid #27272a;border-radius:6px"></canvas>
+<div class=bar><div><div class=ttl>CLAUDE × POLYMARKET</div><div class=sub>ARB · SMART-MONEY COPY · SELF-LEARN AGENT</div></div>
+  <div class=tag>KELLY-CAPPED · ON-CHAIN DATA · PAPER</div><div class=clock id=clock>--:--:-- UTC</div></div>
+<div class=ribbon id=ribbon></div>
+<div class=grid>
+  <div class=box><div class=lbl>PAPER ACCOUNT · REALIZED PnL</div><div class=big id=pnlbig>$0</div>
+    <div class=kpis>
+      <div><div class=lbl>CLOSED</div><div class=num id=k_closed>0</div></div>
+      <div><div class=lbl>WIN RATE</div><div class=num id=k_win>—</div></div>
+      <div><div class=lbl>SHARPE</div><div class=num id=k_sharpe>—</div></div>
+      <div><div class=lbl>OPEN</div><div class=num id=k_open>0</div></div>
+    </div>
+    <div class=lbl style=margin-top:8px>EXPOSURE / CAP <span id=k_exp></span></div><div class=gauge><div id=expbar style=width:0%></div></div>
   </div>
-  <div style="font-size:10px;color:#71717a;margin-top:4px">Estimate, not a guarantee. Confidence rises with sample size; shows "collecting" until ~8+ closed trades. P=0 simply means it isn't trading/winning yet.</div>
+  <div class=box><div class=lbl>★ BEST PAPER TRADE</div><div class="big g" id=bestwin>—</div>
+    <div class=lbl style=margin-top:8px>SIZE DIAL (auto-tuned)</div><div class=num id=k_dial>1.00×</div>
+    <div class=lbl style=margin-top:8px>FREE-ARB BOOKS · GROUPS</div><div class=num id=k_books>0 · 0</div></div>
+  <div class=box><div class=lbl>📈 CUMULATIVE PAPER PnL</div><canvas id=pnlchart width=380 height=130 style=width:100%;margin-top:4px></canvas></div>
 </div>
-<div id=postbl></div>
-<h1 style="margin-top:14px">🧠 SELF-LEARNING — followed wallet scores</h1><div id=scoretbl style=color:#71717a>scoring…</div>
-<h1 style="margin-top:14px">ACTIVITY LOG</h1><pre id=log>connecting…</pre>
+<div class=pills id=pills></div>
+<div class=box style=margin-bottom:8px><div class=lbl>📈 P(PROFIT · NEXT 24H) — Monte-Carlo over the bot's OWN realized trades · honest: shows "collecting" until 8+ closed</div>
+  <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:4px">
+    <div class=big id=oddsbig>—</div><div id=oddsmeta style="font-size:10px;color:#555"></div>
+    <canvas id=oddschart width=420 height=58 style="flex:1;min-width:220px"></canvas></div></div>
+<div class=bot3>
+  <div><h2>⚡ TRADE LOG · LIVE</h2><pre id=log>connecting…</pre></div>
+  <div><h2>OPEN POSITIONS</h2><div id=postbl></div></div>
+  <div><h2>🧠 TOP WALLETS · SELF-SCORED</h2><div id=scoretbl style=color:#666>scoring…</div></div>
+</div>
 <script>
+const CYC=['SCAN','DETECT','VALIDATE','SIZE','FILL','SETTLE']; let cstep=0;
+const $n=n=>(n<0?'-$':'$')+Math.abs(Number(n)||0).toFixed(2);
+function clk(){ const e=document.getElementById('clock'); if(e) e.textContent=new Date().toISOString().slice(11,19)+' UTC'; }
+setInterval(clk,1000); clk();
+function drawLine(id,arr,lo,hi,color,zero){ const cv=document.getElementById(id); if(!cv)return; const ctx=cv.getContext('2d'),W=cv.width,H=cv.height; ctx.clearRect(0,0,W,H);
+  if(!arr||arr.length<2){ ctx.fillStyle='#999';ctx.font='11px monospace';ctx.fillText('building…',8,H/2); return; }
+  let mn=lo,mx=hi; if(mn==null){ mn=Math.min(...arr,zero?0:arr[0]); mx=Math.max(...arr,zero?0:arr[0]); } const rng=(mx-mn)||1;
+  if(zero&&mn<0&&mx>0){ const zy=H-((0-mn)/rng)*H; ctx.strokeStyle='#ddd';ctx.beginPath();ctx.moveTo(0,zy);ctx.lineTo(W,zy);ctx.stroke(); }
+  ctx.strokeStyle=color;ctx.lineWidth=2;ctx.beginPath();
+  arr.forEach((v,i)=>{ const x=i/(arr.length-1)*W,y=H-((v-mn)/rng)*H; i?ctx.lineTo(x,y):ctx.moveTo(x,y); });ctx.stroke(); }
 async function tick(){ try{
   const s=await (await fetch('/status')).json();
-  document.getElementById('mode').textContent=' '+s.mode+(s.killed?' · KILLED':'');
-  document.getElementById('dot').style.background = s.ws==='live'?'#22c55e':(s.ws==='reconnecting'?'#f59e0b':'#71717a');
-  const kpi=(k,v,c)=>'<div class=card><div class=k>'+k+'</div><div class="v '+(c||'')+'">'+v+'</div></div>';
-  const $=n=>'$'+Number(n||0).toFixed(2);
-  document.getElementById('kpis').innerHTML=
-    kpi('WS FEED',s.ws.toUpperCase(),s.ws==='live'?'g':'a')+kpi('BOOKS',s.books,'c')+kpi('GROUPS',s.groups)+
-    kpi('FOLLOWING',s.wallets+' wallets')+kpi('OPEN',s.open+' / '+s.caps.maxOpen)+
-    kpi('EXPOSURE',$(s.exposure)+' / '+$(s.caps.exposure),'a')+kpi('TRADES',s.trades)+
-    kpi('REALIZED P/L',$(s.realized),s.realized>=0?'g':'r')+kpi('SIZE DIAL',(s.copyFracMult||1).toFixed(2)+'×','c')+
-    kpi('DAILY P/L',$(s.dailyPnl),s.dailyPnl>=0?'g':'r');
-  const f=s.forecast||{}; const big=document.getElementById('oddsbig'), meta=document.getElementById('oddsmeta');
-  if(f.p==null||f.conf==='none'){ big.textContent='collecting…'; big.className='v'; meta.innerHTML='no closed paper trades yet — the estimate appears once the bot has booked results.'; }
-  else { const pct=(f.p*100).toFixed(0); big.textContent=pct+'%'; big.className='v '+(f.p>=0.5?'g':f.p>=0.25?'a':'r');
-    meta.innerHTML='confidence: <b>'+f.conf+'</b> ('+f.n+' closed trades)<br>~'+f.ratePerDay+' trades/day expected<br>24h P/L median '+$(f.median)+' · P5 '+$(f.p5)+' · P95 '+$(f.p95); }
-  try{ const cv=document.getElementById('oddschart'),ctx=cv.getContext('2d'); ctx.clearRect(0,0,cv.width,cv.height); const W=cv.width,H=cv.height;
-    const hp=(s.probHist||[]).filter(x=>x.p!=null);
-    if(hp.length>1){ ctx.strokeStyle='#27272a';ctx.beginPath();ctx.moveTo(0,H/2);ctx.lineTo(W,H/2);ctx.stroke();
-      ctx.strokeStyle='#22d3ee';ctx.lineWidth=2;ctx.beginPath();
-      hp.forEach((x,i)=>{const px=i/(hp.length-1)*W,py=H-(x.p*H);i?ctx.lineTo(px,py):ctx.moveTo(px,py);});ctx.stroke();
-      ctx.fillStyle='#71717a';ctx.font='9px monospace';ctx.fillText('100%',2,9);ctx.fillText('0%',2,H-2);}
-    else{ctx.fillStyle='#71717a';ctx.font='11px monospace';ctx.fillText('building history…',8,H/2);} }catch(e){}
-  if(s.positions.length){ let h='<table><tr><th>market</th><th>kind</th><th>cost</th><th>locked</th><th>source</th></tr>';
-    for(const p of s.positions) h+='<tr><td>'+(p.market||'').slice(0,52)+'</td><td>'+p.kind+'</td><td>'+$(p.cost)+'</td><td>'+(p.locked?$(p.locked):'-')+'</td><td>'+(p.source||'').slice(0,12)+'</td></tr>';
-    document.getElementById('postbl').innerHTML=h+'</table>'; } else document.getElementById('postbl').innerHTML='<div style=color:#71717a>no open paper positions yet — waiting for an arb or a followed-wallet buy</div>';
-  if(s.scores&&s.scores.length){ let h='<table><tr><th>wallet</th><th>win%</th><th>realized P/L</th><th>positions</th><th>copy weight</th></tr>';
-    for(const w of s.scores){ const ok=w.weight>0; h+='<tr><td>'+w.w.slice(0,12)+'…</td><td>'+(w.winRate*100).toFixed(0)+'%</td><td class="'+(w.pnl>=0?'g':'r')+'">'+$(w.pnl)+'</td><td>'+w.n+'</td><td class="'+(ok?'g':'r')+'">'+w.weight.toFixed(2)+(ok?'':' (dropped)')+'</td></tr>'; }
+  document.getElementById('ribbon').innerHTML=[
+    '<div><b>'+s.mode+(s.killed?' · KILLED':'')+'</b></div>','<div>WS '+s.ws.toUpperCase()+'</div>',
+    '<div>FOLLOWING '+s.wallets+'</div>','<div>TRADES '+s.trades+'</div>','<div>OPEN '+s.open+'/'+s.caps.maxOpen+'</div>',
+    '<div>DAILY '+$n(s.dailyPnl)+'</div>','<div>EXPOSURE '+$n(s.exposure)+'/'+$n(s.caps.exposure)+'</div>'].join('');
+  const pb=document.getElementById('pnlbig'); pb.textContent=$n(s.realized); pb.className='big '+(s.realized>=0?'g':'r');
+  document.getElementById('k_closed').textContent=s.closed;
+  document.getElementById('k_win').textContent=s.winRate==null?'—':(s.winRate*100).toFixed(0)+'%';
+  document.getElementById('k_sharpe').textContent=s.sharpe==null?'—':s.sharpe;
+  document.getElementById('k_open').textContent=s.open;
+  document.getElementById('k_exp').textContent=$n(s.exposure)+' / '+$n(s.caps.exposure);
+  document.getElementById('expbar').style.width=(s.caps.exposure?Math.min(100,s.exposure/s.caps.exposure*100):0)+'%';
+  document.getElementById('bestwin').textContent=s.bestWin==null?'—':'+$'+s.bestWin.toFixed(2);
+  document.getElementById('k_dial').textContent=(s.copyFracMult||1).toFixed(2)+'×';
+  document.getElementById('k_books').textContent=s.books+' · '+s.groups;
+  cstep=(cstep+1)%CYC.length;
+  document.getElementById('pills').innerHTML=CYC.map((c,i)=>'<div class="pill'+(i===cstep?' on':'')+'"><b>0'+(i+1)+'</b>'+c+'</div>').join('');
+  const f=s.forecast||{}, ob=document.getElementById('oddsbig'), om=document.getElementById('oddsmeta');
+  if(f.p==null||f.conf==='none'){ ob.textContent='collecting…'; ob.className='big'; om.innerHTML='no closed paper trades yet — a real % appears once results are booked.'; }
+  else{ ob.textContent=(f.p*100).toFixed(0)+'%'; ob.className='big '+(f.p>=0.5?'g':f.p>=0.25?'a':'r');
+    om.innerHTML='confidence <b>'+f.conf+'</b> · '+f.n+' closed · ~'+f.ratePerDay+'/day<br>24h P/L med '+$n(f.median)+' · P5 '+$n(f.p5)+' · P95 '+$n(f.p95); }
+  drawLine('oddschart',(s.probHist||[]).filter(x=>x.p!=null).map(x=>x.p),0,1,'#6c4ad6');
+  drawLine('pnlchart',s.pnlSeries||[],null,null,'#138a3e',true);
+  if(s.positions.length){ let h='<table><tr><th>MARKET</th><th>KIND</th><th>COST</th></tr>';
+    for(const p of s.positions) h+='<tr><td>'+(p.market||'').slice(0,38)+'</td><td>'+p.kind+'</td><td>'+$n(p.cost)+'</td></tr>';
+    document.getElementById('postbl').innerHTML=h+'</table>'; }
+  else document.getElementById('postbl').innerHTML='<div style=color:#888;padding:6px>flat — waiting for an arb or a followed-wallet buy</div>';
+  if(s.scores&&s.scores.length){ let h='<table><tr><th>WALLET</th><th>WIN</th><th>PnL</th><th>W</th></tr>';
+    for(const w of s.scores.slice(0,10)){ const ok=w.weight>0; h+='<tr><td>'+w.w.slice(0,10)+'…</td><td>'+(w.winRate*100).toFixed(0)+'%</td><td class="'+(w.pnl>=0?'g':'r')+'">'+$n(w.pnl)+'</td><td class="'+(ok?'g':'r')+'">'+w.weight.toFixed(2)+'</td></tr>'; }
     document.getElementById('scoretbl').innerHTML=h+'</table>'; }
-  else document.getElementById('scoretbl').innerHTML='<span style=color:#71717a>scoring wallets… (first pass runs at startup, then every 30m)</span>';
-  document.getElementById('log').textContent=s.logs.join('\\n');
-  document.getElementById('log').scrollTop=1e9;
-}catch(e){ document.getElementById('log').textContent='monitor offline: '+e.message; } }
+  const lg=document.getElementById('log'); lg.textContent=(s.logs||[]).join('\\n'); lg.scrollTop=1e9;
+}catch(e){ const lg=document.getElementById('log'); if(lg) lg.textContent='monitor offline: '+e.message; } }
 tick(); setInterval(tick,2000);
 </script></body></html>`;
 
