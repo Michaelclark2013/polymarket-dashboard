@@ -18,8 +18,8 @@ const lastSeen = new Map();
  *   signal = { wallet, token, price, shares, usdc, title, outcome, conditionId, ts }
  * On the first poll of a wallet we only set the high-water mark (no backfill spam).
  */
-async function pollFollowed(onCopy){
-  const wallets = cfg.FOLLOW_WALLETS;
+async function pollFollowed(onCopy, walletList){
+  const wallets = (walletList && walletList.length) ? walletList : cfg.FOLLOW_WALLETS;
   if (!wallets.length) return { followed: 0, newSignals: 0 };
   let newSignals = 0;
   for (const w of wallets){

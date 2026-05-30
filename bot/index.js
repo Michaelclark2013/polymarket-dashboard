@@ -15,7 +15,7 @@ const cfg = require('./config');
 const { getBinaryMarkets, getNegRiskEvents, findBinaryArbs, findMultiArbs, buildArb, getBook } = require('./lib');
 const { LiveFeed } = require('./feed');
 const { pollFollowed } = require('./copy');
-const { scoreAll } = require('./learn');
+const { scoreAll, discoverCandidates } = require('./learn');
 
 const STATE_FILE = __dirname + '/state.json';
 const todayKey = () => new Date().toISOString().slice(0,10); // UTC day
@@ -42,7 +42,7 @@ function startMonitor(){
         mode: cfg.LIVE ? 'LIVE' : 'PAPER', killed: !!s.killed,
         ws: STATUS.feed ? (STATUS.feed.connected?'live':'reconnecting') : 'rest',
         books: STATUS.feed ? STATUS.feed.bookCount() : 0, groups: STATUS.groups(),
-        wallets: cfg.FOLLOW_WALLETS.length, trades: s.trades||0, open: (s.open||[]).length,
+        wallets: (Array.isArray(s.activeWallets)&&s.activeWallets.length) ? s.activeWallets.length : cfg.FOLLOW_WALLETS.length, trades: s.trades||0, open: (s.open||[]).length,
         exposure: exposure(s), dailyPnl: s.dailyRealized||0, realized: s.realizedTotal||0, copyFracMult: s.copyFracMult||1,
         caps: { perTrade: cfg.MAX_PER_TRADE_USD, exposure: cfg.MAX_EXPOSURE_USD, dailyKill: cfg.DAILY_LOSS_KILL_USD, maxOpen: cfg.MAX_OPEN_POSITIONS },
         positions: (s.open||[]).map(p=>({ market:p.market, kind:p.kind, cost:p.cost, pairs:p.pairs, locked:p.lockedProfit||0, source:p.source||'', when:p.openedAt })),
@@ -242,19 +242,26 @@ async function mirrorCopy(sig){
   if (s.open.length >= cfg.MAX_OPEN_POSITIONS) return log('[copy] max open reached — skip.');
   const weight = copyWeight(s, sig.wallet);
   if (weight <= 0){ return log(`[copy] skip ${sig.wallet.slice(0,10)} — weight 0 (their record or our copies of them losing).`); }
-  const fracMult = clamp(s.copyFracMult || 1, 0.5, 2);    // auto-tuned global sizing dial (#3)
+  // ENTRY DISCIPLINE (#3): don't chase — only mirror if we can still get in near the whale's price,
+  // and use the REAL current ask as our entry (we pay the ask, not their fill).
+  const book = await getBook(sig.token);
+  const ask = book && book.asks[0] ? book.asks[0].price : null;
+  const entry = ask != null ? ask : sig.price;
+  if (ask != null && sig.price > 0 && ask > sig.price * (1 + cfg.COPY_CHASE_MAX))
+    return log(`[copy] skip ${sig.wallet.slice(0,8)} "${(sig.title||'').slice(0,30)}" — chased: ask ${ask} > entry ${sig.price}×${(1+cfg.COPY_CHASE_MAX)}`);
+  const fracMult = clamp(s.copyFracMult || 1, 0.5, 2);    // auto-tuned global sizing dial
   const room = Math.max(0, cfg.MAX_EXPOSURE_USD - exposure(s));
   const usdcTarget = Math.min(sig.usdc * cfg.COPY_FRACTION * weight * fracMult, cfg.MAX_PER_TRADE_USD, room);
   if (usdcTarget < 0.5) return;
-  const shares = sig.price>0 ? usdcTarget/sig.price : 0;
+  const shares = entry>0 ? usdcTarget/entry : 0;
   if (shares < 1) return;
-  const cost = shares*sig.price;
+  const cost = shares*entry;
   const tag = cfg.LIVE ? 'LIVE' : 'PAPER';
-  log(`${tag} COPY ← ${sig.wallet.slice(0,10)} BUY "${(sig.title||'').slice(0,38)}" ${sig.outcome} @${sig.price} | ${Math.round(shares)} sh ($${cost.toFixed(2)}) w${weight.toFixed(2)}×${fracMult.toFixed(2)}`);
+  log(`${tag} COPY ← ${sig.wallet.slice(0,10)} BUY "${(sig.title||'').slice(0,38)}" ${sig.outcome} entry@${entry.toFixed(3)} | ${Math.round(shares)} sh ($${cost.toFixed(2)}) w${weight.toFixed(2)}×${fracMult.toFixed(2)}`);
   try {
-    const fill = await buyLeg(sig.token, sig.price, shares);
+    const fill = await buyLeg(sig.token, entry, shares);
     s.open.push({ market: `COPY:${sig.title}`, kind:'copy', source: sig.wallet, token: sig.token,
-                  legs:[{token:sig.token,label:sig.outcome,price:sig.price}], entry: sig.price,
+                  legs:[{token:sig.token,label:sig.outcome,price:entry}], entry,
                   pairs: Math.round(shares), shares: Math.round(shares), cost, lockedProfit: 0, openedAt: Date.now(), mode: tag, fills:[fill] });
     s.trades++; saveState(s);
     log(`${tag} copy filled. open=${s.open.length} exposure=${usd(exposure(s))}`);
@@ -301,30 +308,34 @@ function onWhaleSell(sig){
 }
 function onCopySignal(sig){ return sig.side === 'SELL' ? onWhaleSell(sig) : mirrorCopy(sig); }
 function startManageLoop(){ const t=()=>manageOpen().catch(e=>log('[manage] '+e.message)); t(); setInterval(t, cfg.MANAGE_MS); }
+// the bot follows a DYNAMIC active set (top-scored), maintained by the learn loop; falls back to the seed list
+function activeWallets(s){ const a = s.activeWallets; return (Array.isArray(a) && a.length) ? a : cfg.FOLLOW_WALLETS; }
 function startCopyLoop(){
-  if (!cfg.FOLLOW_WALLETS.length){ log('[copy] no FOLLOW_WALLETS set — add sharp wallets (from the dashboard Smart $ tab) to enable smart-money copy.'); return; }
-  log(`[copy] following ${cfg.FOLLOW_WALLETS.length} wallet(s) · mirror ${(cfg.COPY_FRACTION*100).toFixed(1)}% of their size (capped $${cfg.MAX_PER_TRADE_USD}) · min $${cfg.COPY_MIN_USDC}`);
+  if (!cfg.FOLLOW_WALLETS.length){ log('[copy] no seed wallets — add some to follow_wallets.json; the scout will still discover more.'); }
+  log(`[copy] mirror ${(cfg.COPY_FRACTION*100).toFixed(1)}% of size (capped $${cfg.MAX_PER_TRADE_USD}) · min $${cfg.COPY_MIN_USDC} · no-chase ${(cfg.COPY_CHASE_MAX*100).toFixed(0)}%`);
   const tick = async () => {
     try {
       const s = loadState(); if (s.killed) return;
       if (cfg.LIVE && !(await ensureLiveReady(s))) return;
-      const r = await pollFollowed(sig => { try { onCopySignal(sig); } catch(e){ log('[copy] '+e.message); } });
-      if (r.newSignals) log(`[copy] ${r.newSignals} new signal(s) from ${r.followed} wallet(s)`);
+      const r = await pollFollowed(sig => { try { onCopySignal(sig); } catch(e){ log('[copy] '+e.message); } }, activeWallets(s));
+      if (r.newSignals) log(`[copy] ${r.newSignals} new signal(s) from ${r.followed} active wallet(s)`);
     } catch(e){ log('[copy] poll error: '+e.message); }
   };
   tick(); setInterval(tick, cfg.COPY_POLL_MS);
 }
-/* ---- CYCLE [BOT] (2026-05-30): self-learning wallet scoring loop ---- */
+/* ---- CYCLE [BOT] (2026-05-30): self-learning loop — SCOUT new wallets + score (recency/anti-luck) + auto-follow top-N ---- */
 function startLearnLoop(){
-  if (!cfg.FOLLOW_WALLETS.length) return;
   const tick = async () => {
     try {
-      const scores = await scoreAll(cfg.FOLLOW_WALLETS);
-      const s = loadState(); s.walletScores = scores; saveState(s);
-      const ranked = Object.entries(scores).sort((a,b)=>b[1].weight-a[1].weight);
-      const live = ranked.filter(([,v])=>v.weight>0).length;
-      log(`[learn] scored ${ranked.length} wallets · ${live} pass (net-positive & ≥50% win) · ` +
-          ranked.slice(0,3).map(([w,v])=>`${w.slice(0,8)}=${(v.winRate*100).toFixed(0)}%/${usd(v.pnl)}→w${v.weight.toFixed(2)}`).join(' '));
+      const discovered = await discoverCandidates(cfg.DISCOVER_MARKETS);
+      const seed = cfg.FOLLOW_WALLETS.map(w=>w.toLowerCase());
+      const universe = [...new Set([...seed, ...discovered])].slice(0, 40); // bound the work (scored concurrently)
+      const scores = await scoreAll(universe);
+      const ranked = Object.entries(scores).filter(([,v])=>v.weight>0).sort((a,b)=>b[1].weight-a[1].weight);
+      const active = ranked.slice(0, cfg.FOLLOW_MAX).map(([w])=>w);
+      const s = loadState(); s.walletScores = scores; s.activeWallets = active; saveState(s);
+      log(`[learn] scouted ${universe.length} wallets · ${ranked.length} pass · following top ${active.length} · ` +
+          ranked.slice(0,3).map(([w,v])=>`${w.slice(0,8)}=${(v.winRate*100).toFixed(0)}%/${usd(v.pnl)}(sh${v.sharpe},c${v.concentration})→w${v.weight}`).join(' '));
     } catch(e){ log('[learn] '+e.message); }
   };
   tick(); setInterval(tick, cfg.SCORE_INTERVAL_MS);
