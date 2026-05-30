@@ -33,10 +33,26 @@ async function getLiveClient(){
   const { ClobClient } = require('@polymarket/clob-client');
   const { ethers } = require('ethers');
   const wallet = new ethers.Wallet(cfg.PRIVATE_KEY);
-  const client = new ClobClient(cfg.CLOB_API_URL, cfg.CHAIN_ID, wallet);
-  const creds = await client.createOrDeriveApiKey();
-  liveClient = new ClobClient(cfg.CLOB_API_URL, cfg.CHAIN_ID, wallet, creds);
+  const funder = cfg.FUNDER_ADDRESS || await wallet.getAddress();
+  const l1 = new ClobClient(cfg.CLOB_API_URL, cfg.CHAIN_ID, wallet);
+  const creds = await l1.createOrDeriveApiKey();
+  liveClient = new ClobClient(cfg.CLOB_API_URL, cfg.CHAIN_ID, wallet, creds, cfg.SIGNATURE_TYPE, funder);
   return liveClient;
+}
+// Verify the wallet can actually trade BEFORE placing anything (real money safety).
+let _liveReadyChecked = false;
+async function ensureLiveReady(s){
+  if (!cfg.LIVE || _liveReadyChecked) return true;
+  const { AssetType, COLLATERAL_TOKEN_DECIMALS } = require('@polymarket/clob-client');
+  const client = await getLiveClient();
+  const ba = await client.getBalanceAllowance({ asset_type: AssetType.COLLATERAL });
+  const bal = Number(ba.balance) / 10**COLLATERAL_TOKEN_DECIMALS;
+  const allow = Number(ba.allowance) / 10**COLLATERAL_TOKEN_DECIMALS;
+  log(`live wallet USDC balance ${usd(bal)} · exchange allowance ${usd(allow)}`);
+  if (bal < cfg.MIN_USDC_BALANCE){ s.killed=true; saveState(s); log(`USDC balance ${usd(bal)} < MIN_USDC_BALANCE ${usd(cfg.MIN_USDC_BALANCE)} — refusing to trade.`); return false; }
+  if (allow <= 0){ s.killed=true; saveState(s); log('USDC allowance is 0 — run `node preflight.js --set-allowance` first. Refusing to trade.'); return false; }
+  _liveReadyChecked = true;
+  return true;
 }
 
 // Place a single market BUY leg. Paper: just records. Live: signs + posts a FOK buy.
@@ -88,6 +104,7 @@ async function scan(){
   const multiArbs = await findMultiArbs(events);
   const arbs = [...binArbs, ...multiArbs].sort((a,b)=>b.lockedProfit - a.lockedProfit);
   log(`scanned ${markets.length} binary + ${events.length} multi-outcome events · ${arbs.length} actionable arb(s) · exposure ${usd(exposure(s))} · dailyP/L ${usd(s.dailyRealized)}`);
+  if (arbs.length && cfg.LIVE && !(await ensureLiveReady(s))) return; // real-money preflight gate
   for (const arb of arbs){
     const s2 = loadState(); // re-read so caps reflect this cycle's fills
     if (s2.killed) break;

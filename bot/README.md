@@ -34,13 +34,32 @@ Requires Node 18+ (uses global `fetch`). Paper mode tracks simulated positions i
 
 A partial-fill / execution error trips the **kill switch** and stops trading for manual review.
 
-## Going LIVE (real money — only after paper proves out)
-1. `cd bot && npm i` (installs `dotenv`, `@polymarket/clob-client`, `ethers`).
-2. `cp .env.example .env` and set **all three**: `DRY_RUN=false`, `CONFIRM_LIVE=I_UNDERSTAND`,
-   `PRIVATE_KEY=` (a funded **Polygon** wallet: USDC to trade + a little MATIC for gas).
-3. Keep `MAX_PER_TRADE_USD=5` and watch it for days before raising anything.
+## Going LIVE (real money) — full runbook
+Do this only after paper mode has proven profitable. Every step is reversible until step 7.
 
-`bot/.env` and `bot/state.json` are gitignored — your key never gets committed.
+```bash
+cd bot
+npm i                                  # 1. install live deps (clob-client, ethers, dotenv)
+cp .env.example .env                   # 2. create your env
+#    edit .env → set PRIVATE_KEY (and SIGNATURE_TYPE/FUNDER_ADDRESS if funds are in a Polymarket UI account)
+# 3. fund that wallet with USDC.e on Polygon (+ a little MATIC for gas)
+node preflight.js --set-allowance      # 4. approve USDC for the exchange + verify readiness (places NO trades)
+node preflight.js                      # 5. should print "READY"
+#    edit .env → DRY_RUN=false  and  CONFIRM_LIVE=I_UNDERSTAND      # 6. arm live
+node index.js                          # 7. LIVE. Starts at $5/trade.
+```
+
+**Wallet types (the #1 gotcha):**
+- If you exported the private key of a normal wallet that **holds the USDC itself** → `SIGNATURE_TYPE=0` (default), leave `FUNDER_ADDRESS` blank.
+- If your money sits in a **Polymarket UI account** (email/magic or browser-wallet) → set `SIGNATURE_TYPE=1` (or `2`) and `FUNDER_ADDRESS=` your Polymarket proxy/deposit address.
+- `preflight.js` shows the signer + funder it will use and your actual USDC balance/allowance, so you catch a mismatch *before* trading.
+
+**Built-in real-money guards (in addition to the caps):**
+- Three locks to even arm live: `DRY_RUN=false` **and** `CONFIRM_LIVE=I_UNDERSTAND` **and** a `PRIVATE_KEY`.
+- Before the first live order each run, the bot re-checks USDC balance ≥ `MIN_USDC_BALANCE` and allowance > 0 — otherwise it trips the kill switch and trades nothing.
+- Orders are fill-or-kill; a partial/failed leg trips the kill switch for manual review.
+
+`bot/.env`, `bot/state.json`, `bot/node_modules` are gitignored — your key never gets committed.
 
 ## Honest limitations — read before risking money
 - **Real arbs are rare and fast.** Sub-100ms bots take most of them; this bot polls on a

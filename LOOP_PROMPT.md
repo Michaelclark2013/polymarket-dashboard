@@ -35,6 +35,12 @@ A) DISCOVER 5 — research, then pick the 5 best next improvements ACROSS BOTH S
             fill-quality (FOK→partial handling); paper-P&L reporting & calibration of the
             bot's own fills; better market filtering; resilience/reconnect; structured logs;
             a "shadow live" mode that signs but cancels (proves signing works, risks $0).
+     [BOT-LIVE-READINESS] (harden the GATED live path so it's correct & safe when the human
+            opts in — but NEVER enable it): preflight checks (balance/allowance/creds), order
+            error handling & retries, fill reconciliation into state, real P&L tracking, market
+            (vs limit) order option, partial-fill recovery, tick-size/min-size validation,
+            settlement/redeem of resolved positions, balance/exposure refresh from chain,
+            structured trade log + audit trail. ALL paper-default; live stays triple-gated.
 
 B) BUILD 5 — implement the active sprint.
    - One file for dashboard → edit yourself or strictly serialize agents (no parallel edits

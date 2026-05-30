@@ -8,6 +8,14 @@
 5. **[DASH] Alert engine** — user thresholds (edge≥X, free-arb, combinatorial Σ<$1) → toast + log.
 4. **[DASH] Auto cross-venue (Kalshi) reference** for the REF column (graceful fallback + manual).
 
+## LIVE-READINESS TRACK (ongoing; live path stays GATED + paper-default — loop NEVER enables it)
+SHIPPED: real clob-client signing path (signatureType/funder), preflight.js readiness checker
+(creds + USDC balance + allowance, optional --set-allowance), pre-trade balance/allowance guard,
+fill-or-kill orders, full live runbook. Wallet keys/secrets gitignored.
+NEXT: fill reconciliation → state, real realized-P&L tracking, partial-fill recovery, tick/min-
+size validation, resolved-position redeem, on-chain exposure refresh, structured audit log,
+optional market-order mode. (All paper-default; live requires the human's triple opt-in.)
+
 ## SHIPPED — Growth Cycle 2 BUILD (2026-05-30) — commit 928310c
 - #6 [DASH] Smart-money whale view — /holders?market=cid → top holders per outcome; 🐋 button
   in Discover; click a whale → inspect their wallet. Verified live (no fabricated fields).

@@ -4,17 +4,21 @@
   "private": true,
   "description": "Free-arbitrage bot for Polymarket — paper-trading by default, hard risk caps.",
   "type": "commonjs",
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "paper": "node index.js",
     "once": "ONCE=true node index.js",
+    "preflight": "node preflight.js",
+    "set-allowance": "node preflight.js --set-allowance",
     "live": "node index.js"
   },
   "comment_paper": "Paper mode needs ZERO install — pure Node 18+ (global fetch).",
   "comment_live": "Live mode needs: npm i  (installs dotenv + the two live deps below).",
   "optionalDependencies": {
-    "dotenv": "^16.4.5",
-    "@polymarket/clob-client": "^4.13.0",
-    "ethers": "^5.7.2"
+    "@polymarket/clob-client": "^4.22.8",
+    "dotenv": "^16.6.1",
+    "ethers": "^5.8.0"
   }
 }

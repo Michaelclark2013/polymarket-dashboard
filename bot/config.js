@@ -32,10 +32,18 @@ const config = {
 
   // --- live wallet (only read when going live) ---
   PRIVATE_KEY: process.env.PRIVATE_KEY || '',
+  // Signature type: 0 = EOA (a normal wallet whose key you exported and which HOLDS the USDC),
+  // 1 = Polymarket email/magic proxy, 2 = Polymarket browser-wallet (Gnosis Safe) proxy.
+  // If your funds sit in a Polymarket UI account, set this + FUNDER_ADDRESS to that proxy wallet.
+  SIGNATURE_TYPE: num(process.env.SIGNATURE_TYPE, 0),
+  FUNDER_ADDRESS: process.env.FUNDER_ADDRESS || '',     // defaults to the signer address when empty
+  AUTO_SET_ALLOWANCE: bool(process.env.AUTO_SET_ALLOWANCE, false), // preflight may set USDC allowance if true
+  MIN_USDC_BALANCE: num(process.env.MIN_USDC_BALANCE, 0), // refuse to live-trade below this USDC balance (0 = use MAX_EXPOSURE_USD)
   CLOB_API_URL: process.env.CLOB_API_URL || 'https://clob.polymarket.com',
   GAMMA_API_URL: process.env.GAMMA_API_URL || 'https://gamma-api.polymarket.com',
   CHAIN_ID: num(process.env.CHAIN_ID, 137),             // Polygon
 };
+config.MIN_USDC_BALANCE = config.MIN_USDC_BALANCE || config.MAX_EXPOSURE_USD;
 
 config.LIVE = !config.DRY_RUN && config.CONFIRM_LIVE === 'I_UNDERSTAND' && !!config.PRIVATE_KEY;
 
