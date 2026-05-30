@@ -38,6 +38,8 @@ const config = {
   COPY_POLL_MS:  num(process.env.COPY_POLL_MS, 20000),   // how often to poll followed wallets' activity
   COPY_MIN_USDC: num(process.env.COPY_MIN_USDC, 50),     // ignore a whale trade smaller than this (noise)
   DATA_API_URL:  process.env.DATA_API_URL || 'https://data-api.polymarket.com',
+  SCORE_INTERVAL_MS: num(process.env.SCORE_INTERVAL_MS, 1800000), // re-score followed wallets every 30m (self-learning)
+  COPY_UNSCORED_WEIGHT: num(process.env.COPY_UNSCORED_WEIGHT, 0.4), // cautious size for not-yet-scored wallets
 
   // --- live wallet (only read when going live) ---
   PRIVATE_KEY: process.env.PRIVATE_KEY || '',

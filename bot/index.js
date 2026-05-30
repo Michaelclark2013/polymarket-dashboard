@@ -15,6 +15,7 @@ const cfg = require('./config');
 const { getBinaryMarkets, getNegRiskEvents, findBinaryArbs, findMultiArbs, buildArb } = require('./lib');
 const { LiveFeed } = require('./feed');
 const { pollFollowed } = require('./copy');
+const { scoreAll } = require('./learn');
 
 const STATE_FILE = __dirname + '/state.json';
 const todayKey = () => new Date().toISOString().slice(0,10); // UTC day
@@ -45,6 +46,7 @@ function startMonitor(){
         exposure: exposure(s), dailyPnl: s.dailyRealized||0,
         caps: { perTrade: cfg.MAX_PER_TRADE_USD, exposure: cfg.MAX_EXPOSURE_USD, dailyKill: cfg.DAILY_LOSS_KILL_USD, maxOpen: cfg.MAX_OPEN_POSITIONS },
         positions: (s.open||[]).map(p=>({ market:p.market, kind:p.kind, cost:p.cost, pairs:p.pairs, locked:p.lockedProfit||0, source:p.source||'', when:p.openedAt })),
+        scores: Object.entries(s.walletScores||{}).map(([w,v])=>({ w, winRate:v.winRate, pnl:v.pnl, n:v.n, weight:v.weight })).sort((a,b)=>b.weight-a.weight),
         logs: recentLogs.slice(-60)
       });
       res.writeHead(200,{'content-type':'application/json','access-control-allow-origin':'*'}); res.end(body); return;
@@ -67,6 +69,7 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{text-align:left;p
 <h1>🤖 POLYMARKET BOT — LIVE MONITOR <span id=dot class=dot></span><span id=mode></span></h1>
 <div class=row id=kpis></div>
 <div id=postbl></div>
+<h1 style="margin-top:14px">🧠 SELF-LEARNING — followed wallet scores</h1><div id=scoretbl style=color:#71717a>scoring…</div>
 <h1 style="margin-top:14px">ACTIVITY LOG</h1><pre id=log>connecting…</pre>
 <script>
 async function tick(){ try{
@@ -83,6 +86,10 @@ async function tick(){ try{
   if(s.positions.length){ let h='<table><tr><th>market</th><th>kind</th><th>cost</th><th>locked</th><th>source</th></tr>';
     for(const p of s.positions) h+='<tr><td>'+(p.market||'').slice(0,52)+'</td><td>'+p.kind+'</td><td>'+$(p.cost)+'</td><td>'+(p.locked?$(p.locked):'-')+'</td><td>'+(p.source||'').slice(0,12)+'</td></tr>';
     document.getElementById('postbl').innerHTML=h+'</table>'; } else document.getElementById('postbl').innerHTML='<div style=color:#71717a>no open paper positions yet — waiting for an arb or a followed-wallet buy</div>';
+  if(s.scores&&s.scores.length){ let h='<table><tr><th>wallet</th><th>win%</th><th>realized P/L</th><th>positions</th><th>copy weight</th></tr>';
+    for(const w of s.scores){ const ok=w.weight>0; h+='<tr><td>'+w.w.slice(0,12)+'…</td><td>'+(w.winRate*100).toFixed(0)+'%</td><td class="'+(w.pnl>=0?'g':'r')+'">'+$(w.pnl)+'</td><td>'+w.n+'</td><td class="'+(ok?'g':'r')+'">'+w.weight.toFixed(2)+(ok?'':' (dropped)')+'</td></tr>'; }
+    document.getElementById('scoretbl').innerHTML=h+'</table>'; }
+  else document.getElementById('scoretbl').innerHTML='<span style=color:#71717a>scoring wallets… (first pass runs at startup, then every 30m)</span>';
   document.getElementById('log').textContent=s.logs.join('\\n');
   document.getElementById('log').scrollTop=1e9;
 }catch(e){ document.getElementById('log').textContent='monitor offline: '+e.message; } }
@@ -220,9 +227,13 @@ async function mirrorCopy(sig){
   const s = loadState();
   if (s.killed) return;
   if (s.open.length >= cfg.MAX_OPEN_POSITIONS) return log('[copy] max open reached — skip.');
-  // size down: a fraction of the whale's USDC, clamped to the per-trade cap and exposure room
+  // SELF-LEARNING: scale by the wallet's learned quality weight; skip wallets that aren't winning
+  const sc = (s.walletScores||{})[sig.wallet];
+  const weight = sc ? sc.weight : cfg.COPY_UNSCORED_WEIGHT;
+  if (weight <= 0){ return log(`[copy] skip ${sig.wallet.slice(0,10)} — learned weight 0 (not profitable).`); }
+  // size down: a fraction of the whale's USDC × learned weight, clamped to the per-trade cap and exposure room
   const room = Math.max(0, cfg.MAX_EXPOSURE_USD - exposure(s));
-  const usdcTarget = Math.min(sig.usdc * cfg.COPY_FRACTION, cfg.MAX_PER_TRADE_USD, room);
+  const usdcTarget = Math.min(sig.usdc * cfg.COPY_FRACTION * weight, cfg.MAX_PER_TRADE_USD, room);
   if (usdcTarget < 0.5) return; // too small to bother
   const shares = sig.price>0 ? usdcTarget/sig.price : 0;
   if (shares < 1) return;
@@ -250,6 +261,21 @@ function startCopyLoop(){
   };
   tick(); setInterval(tick, cfg.COPY_POLL_MS);
 }
+/* ---- CYCLE [BOT] (2026-05-30): self-learning wallet scoring loop ---- */
+function startLearnLoop(){
+  if (!cfg.FOLLOW_WALLETS.length) return;
+  const tick = async () => {
+    try {
+      const scores = await scoreAll(cfg.FOLLOW_WALLETS);
+      const s = loadState(); s.walletScores = scores; saveState(s);
+      const ranked = Object.entries(scores).sort((a,b)=>b[1].weight-a[1].weight);
+      const live = ranked.filter(([,v])=>v.weight>0).length;
+      log(`[learn] scored ${ranked.length} wallets · ${live} pass (net-positive & ≥50% win) · ` +
+          ranked.slice(0,3).map(([w,v])=>`${w.slice(0,8)}=${(v.winRate*100).toFixed(0)}%/${usd(v.pnl)}→w${v.weight.toFixed(2)}`).join(' '));
+    } catch(e){ log('[learn] '+e.message); }
+  };
+  tick(); setInterval(tick, cfg.SCORE_INTERVAL_MS);
+}
 
 (async function main(){
   log('='.repeat(70));
@@ -265,4 +291,5 @@ function startCopyLoop(){
   else { log('detection: REST polling fallback (install ws for the live feed: cd bot && npm i ws).');
     await scan(); setInterval(()=>{ scan().catch(e=>log('scan error: '+e.message)); }, cfg.POLL_MS); }
   startCopyLoop(); // smart-money copy runs alongside arb detection
+  startLearnLoop(); // self-learning: re-score followed wallets, auto-curate who to copy
 })();
