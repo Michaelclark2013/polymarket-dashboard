@@ -31,6 +31,9 @@ const usd = v => (v<0?'-$':'$') + Math.abs(v).toFixed(2);
 const recentLogs = []; // ring buffer for the live monitor
 function log(...a){ const line = `[${new Date().toISOString()}] ` + a.join(' '); console.log(line); recentLogs.push(line); if (recentLogs.length>200) recentLogs.shift(); }
 const STATUS = { feed:null, groups:()=>0 }; // populated by runWithFeed
+// unattended robustness: never let a stray async error kill the data-gathering process
+process.on('unhandledRejection', e => log('[guard] unhandledRejection: ' + (e&&e.message||e)));
+process.on('uncaughtException',  e => log('[guard] uncaughtException: ' + (e&&e.message||e)));
 
 /* ---- CYCLE [BOT] (2026-05-30): built-in live monitor (no deps; Node http) ---- */
 function startMonitor(){
