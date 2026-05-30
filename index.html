@@ -327,7 +327,14 @@
         <button id="dsc_load" class="px-3 py-1.5 rounded bg-cyan-500 text-zinc-950 font-bold text-xs">⟳ LOAD TOP BY VOLUME</button>
       </div>
       <input id="dsc_q" placeholder="filter markets…" aria-label="Filter markets" class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-xs"/>
-      <div id="dsc_list" class="space-y-1 text-xs max-h-72 overflow-y-auto scrollbar"><div class="text-zinc-500">Click LOAD to pull active Polymarket markets (Gamma API). Falls back to an honest "unavailable" if the network/CORS blocks it.</div></div>
+      <div id="dsc_list" class="space-y-1 text-xs max-h-60 overflow-y-auto scrollbar"><div class="text-zinc-500">Click LOAD to pull active Polymarket markets (Gamma API). Falls back to an honest "unavailable" if the network/CORS blocks it.</div></div>
+      <!-- CYCLE 1 BUILD [DASH] (2026-05-30): #1 combinatorial / logical arb scan -->
+      <div class="flex items-center justify-between pt-2 border-t border-zinc-800/60">
+        <div class="text-xs tracking-widest text-zinc-400">COMBINATORIAL ARB</div>
+        <button id="comb_scan" class="px-3 py-1.5 rounded bg-fuchsia-500 text-zinc-950 font-bold text-xs">⟳ SCAN EVENT GROUPS</button>
+      </div>
+      <div class="text-[10px] text-zinc-500">Mutually-exclusive multi-outcome events where Σ outcome prices ≠ $1 → buy-all (Σ&lt;1) or fade (Σ&gt;1). Prices are indicative (last/mid) — verify the book before trading.</div>
+      <div id="comb_out" class="space-y-1 text-xs max-h-60 overflow-y-auto scrollbar"></div>
     </div>
     <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4 space-y-3">
       <div class="text-xs tracking-widest text-zinc-400">FREE-ARB CHECK · YES-ask + NO-ask &lt; $1</div>
@@ -355,6 +362,23 @@
         <tbody id="sc_rows" class="num"></tbody>
       </table>
     </div>
+  </div>
+</section>
+
+<!-- =========================================================== -->
+<!-- SMART MONEY (CYCLE 1 BUILD [DASH] 2026-05-30) -->
+<!-- =========================================================== -->
+<section data-pane="smartmoney" class="hidden space-y-4">
+  <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4 space-y-3">
+    <div class="text-xs tracking-widest text-zinc-400">SMART-MONEY WALLET INSPECTOR</div>
+    <div class="text-[10px] text-zinc-500">Track what sharp wallets actually hold. Paste a Polymarket wallet address (0x… proxy wallet) — real positions, portfolio value &amp; recent activity from Polymarket's public Data API. One-click any position into the Analyzer. No fabricated numbers; missing fields show "—".</div>
+    <div class="flex gap-2 flex-wrap">
+      <input id="sm_addr" placeholder="0x wallet address" aria-label="Wallet address" class="flex-1 min-w-0 bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-xs"/>
+      <button id="sm_go" class="px-3 py-1.5 rounded bg-emerald-500 text-zinc-950 font-bold text-xs">INSPECT</button>
+    </div>
+    <div id="sm_watch" class="text-[10px] text-zinc-500"></div>
+    <div id="sm_summary" class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs"></div>
+    <div id="sm_out" class="text-xs text-zinc-400"></div>
   </div>
 </section>
 
@@ -430,7 +454,7 @@ function deepMerge(a,b){ for (const k of Object.keys(b)) { if (k==='__proto__'||
 const TABS = [
   ['dashboard','Dashboard'],['analyzer','Analyzer'],['sizer','Sizer'],
   ['simulator','Simulator'],['portfolio','Portfolio'],['analytics','Analytics'],
-  ['scanner','Scanner'],['live','Live']
+  ['scanner','Scanner'],['smartmoney','Smart $'],['live','Live']
 ];
 const tabs = document.getElementById('tabs');
 TABS.forEach(([k,l])=>{
@@ -449,6 +473,7 @@ function showTab(k){
   if (k==='scanner')   renderScanner();
   if (k==='analyzer')  renderAnalyzer();
   if (k==='live')      renderLive();
+  if (k==='smartmoney') renderSmartMoney();
 }
 document.querySelectorAll('[data-jump]').forEach(b=>b.onclick=()=>showTab(b.dataset.jump));
 
@@ -1059,6 +1084,79 @@ async function runArb(){
   out.innerHTML=lines.map(l=>`<div>${l}</div>`).join('');
 }
 if($('arb_go')) $('arb_go').onclick = runArb;
+
+/* ---- CYCLE 1 BUILD [DASH] (2026-05-30): #1 combinatorial / logical arb scan ---- */
+async function findCombinatorialArbs(){
+  const raw = await safeJson('https://gamma-api.polymarket.com/events?closed=false&active=true&limit=120&order=volume24hr&ascending=false');
+  if(!Array.isArray(raw)) return null;
+  const out=[];
+  for(const ev of raw){
+    const mkts = Array.isArray(ev.markets)? ev.markets : [];
+    // CYCLE 1 BUILD [DASH] (2026-05-30): ONLY neg-risk = truly mutually-exclusive (exactly one resolves YES).
+    // Non-neg-risk multi-market groups (e.g. "insult person 1..N") are INDEPENDENT — Σ is meaningless, not an arb.
+    if(!(ev.negRisk===true || ev.enableNegRisk===true) || mkts.length<2) continue;
+    let sum=0, n=0, legs=[];
+    for(const m of mkts){
+      let px=[]; try{ px=JSON.parse(m.outcomePrices||'[]').map(Number); }catch{}
+      const yes=finite(px[0]); if(yes==null) continue;
+      sum+=yes; n++; legs.push({label:(m.groupItemTitle||m.question||'').slice(0,32), yes});
+    }
+    if(n<2) continue;
+    const dev = sum-1;
+    // Only Σ<$1 is a genuine risk-free BUY-ALL arb. Σ>1 ("fade") isn't safely executable on
+    // Polymarket and is dominated by overround/illiquid-longshot noise → not shown as opportunity.
+    if(dev > -0.02) continue;
+    out.push({ title: ev.title||ev.slug||'(event)', sum, dev, n, legs });
+  }
+  return out.sort((a,b)=>a.dev-b.dev).slice(0,40);
+}
+if($('comb_scan')) $('comb_scan').onclick = async () => {
+  const box=$('comb_out'); box.innerHTML='<div class="text-fuchsia-300">scanning event groups…</div>';
+  const arbs=await findCombinatorialArbs();
+  if(!arbs){ box.innerHTML='<div class="text-amber-400">Event data unavailable (network/CORS).</div>'; return; }
+  if(!arbs.length){ box.innerHTML='<div class="text-zinc-500">no underpriced (Σ&lt;$1) mutually-exclusive baskets right now — these true arbs are rare. (Σ&gt;1 overround is not shown: not safely executable.)</div>'; return; }
+  box.innerHTML=arbs.map(a=>{
+    const edge=(Math.abs(a.dev)*100).toFixed(1);
+    return `<div class="border-b border-zinc-800/60 py-1"><div class="flex justify-between gap-2"><div class="truncate flex-1">${esc(a.title)}</div>
+      <div class="text-emerald-400 num shrink-0">Σ ${(a.sum*100).toFixed(1)}¢ · BUY-ALL +${edge}¢</div></div>
+      <div class="text-[10px] text-zinc-500 truncate">${a.n} outcomes · indicative px — verify books before trading · ${esc(a.legs.map(l=>l.label+' '+(l.yes*100).toFixed(0)).join(' · ')).slice(0,120)}</div></div>`;
+  }).join('');
+};
+
+/* ---- CYCLE 1 BUILD [DASH] (2026-05-30): #2 smart-money wallet inspector (Polymarket Data API) ---- */
+const DATA_API='https://data-api.polymarket.com';
+function renderSmartMoney(){
+  if($('sm_go') && !$('sm_go')._wired){ $('sm_go')._wired=true; $('sm_go').onclick = inspectWallet; $('sm_addr').onkeydown=e=>{ if(e.key==='Enter') inspectWallet(); }; }
+}
+async function inspectWallet(){
+  const addr=($('sm_addr').value||'').trim();
+  const out=$('sm_out'), sum=$('sm_summary');
+  if(!/^0x[a-fA-F0-9]{40}$/.test(addr)){ out.innerHTML='<span class="text-amber-400">Enter a valid 0x wallet address (42 chars).</span>'; sum.innerHTML=''; return; }
+  out.innerHTML='<span class="text-emerald-300">loading…</span>'; sum.innerHTML='';
+  const [val,pos,act] = await Promise.all([
+    safeJson(`${DATA_API}/value?user=${addr}`),
+    safeJson(`${DATA_API}/positions?user=${addr}&sizeThreshold=1&limit=100`),
+    safeJson(`${DATA_API}/activity?user=${addr}&limit=15`)
+  ]);
+  if(val==null && pos==null){ out.innerHTML='<span class="text-amber-400">Wallet data unavailable (network/CORS or empty wallet).</span>'; return; }
+  const portfolio = Array.isArray(val)&&val[0]? finite(val[0].value) : null;
+  const positions = Array.isArray(pos)? pos : [];
+  const totCur = positions.reduce((a,p)=>a+(finite(p.currentValue)||0),0);
+  const totPnl = positions.reduce((a,p)=>a+(finite(p.cashPnl)||0),0);
+  sum.innerHTML = `
+    <div class="rounded border border-zinc-800 bg-zinc-900/50 p-3"><div class="text-[10px] text-zinc-500">PORTFOLIO VALUE</div><div class="text-xl font-bold text-emerald-400 num">${portfolio!=null?usd(portfolio):'—'}</div></div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/50 p-3"><div class="text-[10px] text-zinc-500">OPEN POSITIONS</div><div class="text-xl font-bold num">${positions.length}</div></div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/50 p-3"><div class="text-[10px] text-zinc-500">OPEN MTM VALUE</div><div class="text-xl font-bold text-cyan-300 num">${positions.length?usd(totCur):'—'}</div></div>
+    <div class="rounded border border-zinc-800 bg-zinc-900/50 p-3"><div class="text-[10px] text-zinc-500">UNREALIZED P&L</div><div class="text-xl font-bold num ${totPnl>=0?'text-emerald-400':'text-red-400'}">${positions.length?usd(totPnl):'—'}</div></div>`;
+  const top = positions.slice().sort((a,b)=>(finite(b.currentValue)||0)-(finite(a.currentValue)||0)).slice(0,30);
+  const posHtml = top.length ? `<div class="overflow-x-auto scrollbar"><table class="w-full text-xs num"><thead class="text-zinc-500 text-[10px] tracking-widest"><tr class="border-b border-zinc-800"><th class="text-left py-1">MARKET</th><th>OUT</th><th>SHARES</th><th>AVG</th><th>NOW</th><th>VALUE</th><th>P&L</th><th></th></tr></thead><tbody>`+
+    top.map(p=>{ const cur=finite(p.curPrice), avg=finite(p.avgPrice), pnl=finite(p.cashPnl);
+      return `<tr class="border-b border-zinc-800/60"><td class="py-1">${esc((p.title||p.slug||'').slice(0,46))}</td><td class="text-center">${esc(p.outcome||'')}</td><td class="text-center">${Math.round(finite(p.size)||0)}</td><td class="text-center">${avg!=null?cents(avg):'—'}</td><td class="text-center">${cur!=null?cents(cur):'—'}</td><td class="text-center">${usd(finite(p.currentValue)||0)}</td><td class="text-center ${pnl>=0?'text-emerald-400':'text-red-400'}">${pnl!=null?usd(pnl):'—'}</td><td class="text-center">${p.title?`<button class="text-cyan-300" data-smmkt="${esc(p.title)}" data-smpx="${cur!=null?cur:''}">→</button>`:''}</td></tr>`;
+    }).join('')+`</tbody></table></div>` : '<div class="text-zinc-500">no open positions for this wallet.</div>';
+  const actHtml = Array.isArray(act)&&act.length ? `<div class="mt-3 text-[10px] text-zinc-500">RECENT ACTIVITY</div>`+act.slice(0,10).map(a=>`<div class="text-[10px] text-zinc-400 truncate">${new Date((finite(a.timestamp)||0)*1000).toLocaleDateString()} · ${esc(a.type||'')} ${esc((a.title||'').slice(0,50))} ${a.outcome?esc(a.outcome):''} ${finite(a.usdcSize)!=null?usd(finite(a.usdcSize)):''}</div>`).join('') : '';
+  out.innerHTML = posHtml + actHtml;
+  out.onclick = e=>{ const t=e.target.closest('[data-smmkt]'); if(!t) return; $('a_market').value=t.dataset.smmkt; if(t.dataset.smpx) $('a_price').value=Number(t.dataset.smpx).toFixed(2); showTab('analyzer'); };
+}
 
 /* ------------------------------ LIVE WS ------------------------------ */
 const WS_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws/market';

@@ -15,9 +15,29 @@ async function getBinaryMarkets(limit){
   const out = [];
   for (const m of raw){
     let toks = []; try { toks = JSON.parse(m.clobTokenIds || '[]'); } catch {}
-    if (!Array.isArray(toks) || toks.length !== 2) continue; // free-arb only well-defined for binary YES/NO
-    out.push({ q: m.question || '(untitled)', yes: toks[0], no: toks[1],
-               vol: fin(m.volume) || fin(m.volume24hr) || 0, end: m.endDate || null });
+    if (!Array.isArray(toks) || toks.length !== 2) continue;
+    out.push({ q: m.question || '(untitled)', yes: toks[0], no: toks[1] });
+  }
+  return out;
+}
+
+/* CYCLE 1 BUILD [BOT] (2026-05-30): multi-outcome (neg-risk) event groups for combinatorial arb. */
+async function getNegRiskEvents(limit){
+  const raw = await safeJson(`${cfg.GAMMA_API_URL}/events?closed=false&active=true&limit=${limit}&order=volume24hr&ascending=false`);
+  if (!Array.isArray(raw)) return null;
+  const out = [];
+  for (const ev of raw){
+    const mkts = Array.isArray(ev.markets) ? ev.markets : [];
+    // CYCLE 1 BUILD [BOT] (2026-05-30): ONLY neg-risk events are mutually-exclusive (exactly one wins).
+    // Buying all outcomes is a guaranteed-$1 arb ONLY when mutually exclusive — never trust mkts.length alone,
+    // or independent markets would be mistaken for a "risk-free" basket. Safety-critical filter.
+    if (!(ev.negRisk === true || ev.enableNegRisk === true) || mkts.length < 2) continue;
+    const legs = [];
+    for (const m of mkts){
+      let toks = []; try { toks = JSON.parse(m.clobTokenIds || '[]'); } catch {}
+      if (toks[0]) legs.push({ token: toks[0], label: (m.groupItemTitle || m.question || '').slice(0,40) });
+    }
+    if (legs.length >= 3 && legs.length <= 12) out.push({ q: ev.title || ev.slug || '(event)', legs });
   }
   return out;
 }
@@ -29,7 +49,6 @@ async function getBook(tokenId){
   return { bids: map(d.bids).sort((a,b)=>b.price-a.price), asks: map(d.asks).sort((a,b)=>a.price-b.price) };
 }
 
-/* Walk asks to fill `shares`, return avg fill price and whether fully cleared. */
 function walk(levels, shares){
   let need = shares, cost = 0, filled = 0;
   for (const l of levels){ if (need<=0) break; const take = Math.min(need, l.size); cost += take*l.price; filled += take; need -= take; }
@@ -37,32 +56,43 @@ function walk(levels, shares){
 }
 
 /*
- * Find actionable BUY-BOTH arbs: best-ask(YES) + best-ask(NO) < $1.
- * Buying 1 YES + 1 NO costs (askY+askN) and pays exactly $1 at resolution → risk-free if sum<1.
- * We size to the smaller top-of-book ask and to the per-trade $ cap, and require an edge
- * after a configurable buffer (covers fees/slippage/gas). Returns sorted best-first.
+ * Generic multi-leg BUY-ALL arb: buying 1 share of each mutually-exclusive outcome costs
+ * Σ best-ask and pays exactly $1 at resolution (exactly one wins). If Σ < $1 (after buffer),
+ * the gap is locked profit. Binary YES+NO is the 2-leg case. Returns sorted best-first.
+ * arb shape: { kind, market, legs:[{token,price,label,size}], pairs, sum, edgeCents, cost, lockedProfit }
  */
-async function findArbs(markets){
-  const minNet = (cfg.MIN_EDGE_CENTS + cfg.EDGE_BUFFER_CENTS) / 100; // required raw edge
+function buildArb(kind, market, legBooks){
+  if (legBooks.some(b => !b.book || !b.book.asks[0])) return null;
+  const legs = legBooks.map(b => ({ token: b.token, label: b.label||'', price: b.book.asks[0].price, size: b.book.asks[0].size }));
+  const sum = legs.reduce((a,l)=>a+l.price, 0);
+  const rawEdge = 1 - sum;
+  const minNet = (cfg.MIN_EDGE_CENTS + cfg.EDGE_BUFFER_CENTS) / 100;
+  if (rawEdge < minNet) return null;
+  const maxByBook = Math.min(...legs.map(l=>l.size));
+  const maxByCap  = sum > 0 ? cfg.MAX_PER_TRADE_USD / sum : 0;
+  const pairs = Math.floor(Math.min(maxByBook, maxByCap));
+  if (pairs < 1) return null;
+  return { kind, market, legs, sum, edgeCents: rawEdge*100, pairs, cost: pairs*sum, lockedProfit: pairs*rawEdge };
+}
+
+async function findBinaryArbs(markets){
   const arbs = [];
   for (const m of markets){
     const [by, bn] = await Promise.all([ getBook(m.yes), getBook(m.no) ]);
-    if (!by || !bn || !by.asks[0] || !bn.asks[0]) continue;
-    const askY = by.asks[0].price, askN = bn.asks[0].price;
-    const sum = askY + askN;
-    const rawEdge = 1 - sum;
-    if (rawEdge < minNet) continue;
-    // size limited by top-of-book on both legs and the per-trade $ cap
-    const maxPairsByBook = Math.min(by.asks[0].size, bn.asks[0].size);
-    const maxPairsByCap  = sum > 0 ? cfg.MAX_PER_TRADE_USD / sum : 0;
-    const pairs = Math.floor(Math.min(maxPairsByBook, maxPairsByCap));
-    if (pairs < 1) continue;
-    const cost = pairs * sum;
-    const lockedProfit = pairs * rawEdge; // guaranteed $ at resolution (pre-fee)
-    arbs.push({ market: m.q, yes: m.yes, no: m.no, askY, askN, sum,
-                edgeCents: rawEdge*100, pairs, cost, lockedProfit });
+    const arb = buildArb('binary', m.q, [{token:m.yes,label:'YES',book:by},{token:m.no,label:'NO',book:bn}]);
+    if (arb) arbs.push(arb);
   }
-  return arbs.sort((a,b)=>b.lockedProfit - a.lockedProfit);
+  return arbs;
 }
 
-module.exports = { safeJson, getBinaryMarkets, getBook, walk, findArbs };
+async function findMultiArbs(events){
+  const arbs = [];
+  for (const ev of events){
+    const books = await Promise.all(ev.legs.map(l=>getBook(l.token)));
+    const arb = buildArb('multi', ev.q, ev.legs.map((l,i)=>({ token:l.token, label:l.label, book:books[i] })));
+    if (arb) arbs.push(arb);
+  }
+  return arbs;
+}
+
+module.exports = { safeJson, getBinaryMarkets, getNegRiskEvents, getBook, walk, findBinaryArbs, findMultiArbs };

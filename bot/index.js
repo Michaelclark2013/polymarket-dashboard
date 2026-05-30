@@ -12,7 +12,7 @@
  * ========================================================================== */
 const fs = require('fs');
 const cfg = require('./config');
-const { getBinaryMarkets, findArbs } = require('./lib');
+const { getBinaryMarkets, getNegRiskEvents, findBinaryArbs, findMultiArbs } = require('./lib');
 
 const STATE_FILE = __dirname + '/state.json';
 const todayKey = () => new Date().toISOString().slice(0,10); // UTC day
@@ -56,13 +56,14 @@ async function executeArb(arb, s){
   if (arb.cost > cfg.MAX_PER_TRADE_USD) return log('per-trade cap exceeded — skipping.');
 
   const tag = cfg.LIVE ? 'LIVE' : 'PAPER';
-  log(`${tag} ARB → "${arb.market}" buy ${arb.pairs} YES@${arb.askY} + ${arb.pairs} NO@${arb.askN} | cost ${usd(arb.cost)} | locked ${usd(arb.lockedProfit)} (${arb.edgeCents.toFixed(2)}¢)`);
+  // CYCLE 1 BUILD [BOT] (2026-05-30): generic multi-leg arb (binary YES+NO or multi-outcome buy-all)
+  const legStr = arb.legs.map(l=>`${l.label||'?'}@${l.price}`).join(' + ');
+  log(`${tag} ${arb.kind.toUpperCase()} ARB → "${arb.market}" buy ${arb.pairs}× [${legStr}] | cost ${usd(arb.cost)} | locked ${usd(arb.lockedProfit)} (${arb.edgeCents.toFixed(2)}¢)`);
   try {
-    const ry = await buyLeg(arb.yes, arb.askY, arb.pairs);
-    const rn = await buyLeg(arb.no,  arb.askN, arb.pairs);
-    s.open.push({ market: arb.market, yes: arb.yes, no: arb.no, pairs: arb.pairs, cost: arb.cost,
-                  lockedProfit: arb.lockedProfit, openedAt: Date.now(), mode: tag,
-                  fills: { yes: ry, no: rn } });
+    const fills = [];
+    for (const leg of arb.legs){ fills.push(await buyLeg(leg.token, leg.price, arb.pairs)); }
+    s.open.push({ market: arb.market, kind: arb.kind, legs: arb.legs.map(l=>({token:l.token,label:l.label,price:l.price})),
+                  pairs: arb.pairs, cost: arb.cost, lockedProfit: arb.lockedProfit, openedAt: Date.now(), mode: tag, fills });
     s.trades++;
     saveState(s);
     log(`${tag} filled. open=${s.open.length} exposure=${usd(exposure(s))}`);
@@ -81,8 +82,12 @@ async function scan(){
 
   const markets = await getBinaryMarkets(cfg.MARKET_SCAN_LIMIT);
   if (!markets){ log('Could not load markets (network/CORS/API). Honest no-op this cycle.'); return; }
-  const arbs = await findArbs(markets);
-  log(`scanned ${markets.length} binary markets · ${arbs.length} actionable arb(s) · exposure ${usd(exposure(s))} · dailyP/L ${usd(s.dailyRealized)}`);
+  const binArbs = await findBinaryArbs(markets);
+  // CYCLE 1 BUILD [BOT] (2026-05-30): also scan multi-outcome (neg-risk) event groups
+  const events = await getNegRiskEvents(Math.min(60, cfg.MARKET_SCAN_LIMIT)) || [];
+  const multiArbs = await findMultiArbs(events);
+  const arbs = [...binArbs, ...multiArbs].sort((a,b)=>b.lockedProfit - a.lockedProfit);
+  log(`scanned ${markets.length} binary + ${events.length} multi-outcome events · ${arbs.length} actionable arb(s) · exposure ${usd(exposure(s))} · dailyP/L ${usd(s.dailyRealized)}`);
   for (const arb of arbs){
     const s2 = loadState(); // re-read so caps reflect this cycle's fills
     if (s2.killed) break;
