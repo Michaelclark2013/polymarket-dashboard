@@ -432,20 +432,11 @@ const DEFAULT_STATE = {
   sizer: { mode: 'aggressive' },
   // CYCLE 2 [FEATURE] (2026-05-29): tunable settings for fee/cost-adjusted EV, risk budget, slippage probe
   settings: { feeBps: 0, riskBudgetPct: 60, probeShares: 500, slipBand: 0.03 },
-  scanner: [
-    { market:'EX: Will candidate X win primary?', side:'YES', price:0.42, fair:0.52, conf:70, days:45, ref:null, cluster:'Politics' },
-    { market:'EX: Fed cuts >50bps in H1',         side:'NO',  price:0.71, fair:0.62, conf:65, days:90, ref:null, cluster:'Macro' },
-    { market:'EX: Movie Y opens >$80M',           side:'YES', price:0.36, fair:0.48, conf:62, days:14, ref:null, cluster:'Entertainment' },
-  ],
-  positions: [
-    // sample open position
-    { id: 'demo1', market:'EX: Will candidate X win primary?', side:'YES', entry:0.42, price:0.47, shares:200, stake:84, opened:Date.now()-86400000*5, status:'open', reason:'10c modeled edge, conf 70', pEntry:0.52, cluster:'Politics', tokenId:'', catalyst:Date.now()+86400000*40 }
-  ],
-  closed: [
-    { id:'c1', market:'EX: Senate seat A flips',   side:'YES', entry:0.30, exit:0.55, shares:300, stake:90,  pnl:75, reason:'Hit +50% partial target', closedAt: Date.now()-86400000*12, pEntry:0.58, outcome:1, cluster:'Politics' },
-    { id:'c2', market:'EX: Bill passes by Mar 1',  side:'NO',  entry:0.40, exit:0.20, shares:250, stake:100, pnl:50, reason:'Thesis confirmed',        closedAt: Date.now()-86400000*8,  pEntry:0.63, outcome:1, cluster:'Politics' },
-    { id:'c3', market:'EX: Team Z makes playoffs', side:'YES', entry:0.55, exit:0.33, shares:200, stake:110, pnl:-44,reason:'Thesis broke (-40% stop)',closedAt: Date.now()-86400000*4,  pEntry:0.61, outcome:0, cluster:'Sports' },
-  ],
+  // CYCLE 2 BUILD [DASH] (2026-05-30): ship EMPTY — honest tool, no fabricated demo data.
+  // Your own trade log starts blank; market data is pulled LIVE from Polymarket.
+  scanner: [],
+  positions: [],
+  closed: [],
   live: [] // [{tokenId, label, mid, best_bid, best_ask, last, bids:[], asks:[], trades:[], imbHist:[]}]
 };
 
@@ -1523,6 +1514,19 @@ renderPortfolio();
 renderScanner();
 renderLive(true);
 setWsStatus('idle','idle');
+
+// CYCLE 2 BUILD [DASH] (2026-05-30): auto-grab LIVE market data on load (no click needed) —
+// populates Scanner→Discover + Analyzer autocomplete from Polymarket Gamma. Honest no-op if blocked.
+(async()=>{
+  try{
+    const m = await loadMarkets(true);
+    if(Array.isArray(m) && m.length){
+      _dscMarkets = m;
+      if(document.querySelector('[data-pane="scanner"]')) renderDiscovery();
+      const dl=$('mktlist'); if(dl) dl.innerHTML=m.slice(0,200).map(x=>`<option value="${esc(x.q)}"></option>`).join('');
+    }
+  }catch{}
+})();
 
 // keep open positions price-synced from live subs (if labels match by tokenId via reason field "tok:<id>")
 setInterval(()=>{
