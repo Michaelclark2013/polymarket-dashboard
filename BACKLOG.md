@@ -1,14 +1,16 @@
 # Backlog — Self-Evolution Loop
 
-## ACTIVE SPRINT — carry-over to next BUILD (from Cycle 1)
-4. **[DASH] Auto cross-venue (Kalshi) reference for the REF column.** (deferred — Kalshi CORS
-   risk; build with graceful fallback + manual override.)
+## ACTIVE SPRINT — carry-over to next BUILD
+4. **[DASH] Auto cross-venue (Kalshi) reference for the REF column** (graceful fallback + manual override).
 5. **[DASH] Alert engine** (edge/arb/combinatorial/smart-money triggers → toast + log).
-   Plus NEW from this cycle:
-6. **[DASH] "Smart money in THIS market" via /holders?market=<conditionId>** — top holders per
-   outcome (extends the wallet inspector; needs conditionId from gamma).
 7. **[DASH/BOT] Combinatorial executability check** — fetch real best-asks for a Σ<$1 basket
    before flagging (current scan uses indicative last/mid; verify book to avoid illiquid traps).
+8. **[DASH] Watchlist of smart wallets** — save inspected wallets; show their newest positions
+   as a feed (the closest honest version of "copy trading").
+
+## SHIPPED — Growth Cycle 2 BUILD (2026-05-30) — commit 928310c
+- #6 [DASH] Smart-money whale view — /holders?market=cid → top holders per outcome; 🐋 button
+  in Discover; click a whale → inspect their wallet. Verified live (no fabricated fields).
 
 ## SHIPPED — Growth Cycle 1 BUILD (2026-05-30) — commit a997338
 - #1 [DASH] Combinatorial arb scan (neg-risk/mutually-exclusive only; Σ<$1 buy-all signals;
