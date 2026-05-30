@@ -22,7 +22,13 @@ const config = {
   EDGE_BUFFER_CENTS: num(process.env.EDGE_BUFFER_CENTS, 0.5), // safety haircut subtracted from raw edge
   MARKET_SCAN_LIMIT: num(process.env.MARKET_SCAN_LIMIT, 150), // how many top-by-volume markets to scan per cycle
 
-  // --- HARD risk limits (very tight defaults) ---
+  // --- bankroll & goal (the account COMPOUNDS from this seed; caps below are absolute ceilings) ---
+  START_CAPITAL: num(process.env.START_CAPITAL, 20),       // paper bankroll seed ($). equity = this + realizedTotal.
+  GOAL_USD:      num(process.env.GOAL_USD, 1000000),       // the ambition. tracked honestly; never fabricated.
+  GOAL_DAYS:     num(process.env.GOAL_DAYS, 365),          // deadline for the goal, in days from first run.
+  PER_TRADE_FRACTION: num(process.env.PER_TRADE_FRACTION, 0.20), // per-trade size as a fraction of current equity (compounding)
+
+  // --- HARD risk limits (absolute ceilings; effective caps are min(these, bankroll-derived)) ---
   MAX_PER_TRADE_USD:  num(process.env.MAX_PER_TRADE_USD, 5),    // max $ committed to one arb pair
   MAX_EXPOSURE_USD:   num(process.env.MAX_EXPOSURE_USD, 25),    // max total $ in open positions
   DAILY_LOSS_KILL_USD:num(process.env.DAILY_LOSS_KILL_USD, 20), // stop the bot for the day if realized loss exceeds this
