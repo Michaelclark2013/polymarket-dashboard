@@ -47,6 +47,7 @@ function startMonitor(){
         caps: { perTrade: cfg.MAX_PER_TRADE_USD, exposure: cfg.MAX_EXPOSURE_USD, dailyKill: cfg.DAILY_LOSS_KILL_USD, maxOpen: cfg.MAX_OPEN_POSITIONS },
         positions: (s.open||[]).map(p=>({ market:p.market, kind:p.kind, cost:p.cost, pairs:p.pairs, locked:p.lockedProfit||0, source:p.source||'', when:p.openedAt })),
         scores: Object.entries(s.walletScores||{}).map(([w,v])=>({ w, winRate:v.winRate, pnl:v.pnl, n:v.n, weight:v.weight })).sort((a,b)=>b.weight-a.weight),
+        forecast: s.forecast || forecast(s), probHist: (s.probHist||[]).map(x=>({t:x.ts, p:x.p})),
         logs: recentLogs.slice(-60)
       });
       res.writeHead(200,{'content-type':'application/json','access-control-allow-origin':'*'}); res.end(body); return;
@@ -68,6 +69,15 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{text-align:left;p
 </style></head><body>
 <h1>🤖 POLYMARKET BOT — LIVE MONITOR <span id=dot class=dot></span><span id=mode></span></h1>
 <div class=row id=kpis></div>
+<div class=card style="display:block;width:100%;box-sizing:border-box">
+  <div class=k>📈 P(PROFIT · NEXT 24H) — Monte-Carlo over the bot's OWN realized paper trades</div>
+  <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:4px">
+    <div id=oddsbig class=v style="font-size:40px">—</div>
+    <div id=oddsmeta style="font-size:11px;color:#a1a1aa"></div>
+    <canvas id=oddschart width=520 height=70 style="flex:1;min-width:240px;background:#000;border:1px solid #27272a;border-radius:6px"></canvas>
+  </div>
+  <div style="font-size:10px;color:#71717a;margin-top:4px">Estimate, not a guarantee. Confidence rises with sample size; shows "collecting" until ~8+ closed trades. P=0 simply means it isn't trading/winning yet.</div>
+</div>
 <div id=postbl></div>
 <h1 style="margin-top:14px">🧠 SELF-LEARNING — followed wallet scores</h1><div id=scoretbl style=color:#71717a>scoring…</div>
 <h1 style="margin-top:14px">ACTIVITY LOG</h1><pre id=log>connecting…</pre>
@@ -84,6 +94,17 @@ async function tick(){ try{
     kpi('EXPOSURE',$(s.exposure)+' / '+$(s.caps.exposure),'a')+kpi('TRADES',s.trades)+
     kpi('REALIZED P/L',$(s.realized),s.realized>=0?'g':'r')+kpi('SIZE DIAL',(s.copyFracMult||1).toFixed(2)+'×','c')+
     kpi('DAILY P/L',$(s.dailyPnl),s.dailyPnl>=0?'g':'r');
+  const f=s.forecast||{}; const big=document.getElementById('oddsbig'), meta=document.getElementById('oddsmeta');
+  if(f.p==null||f.conf==='none'){ big.textContent='collecting…'; big.className='v'; meta.innerHTML='no closed paper trades yet — the estimate appears once the bot has booked results.'; }
+  else { const pct=(f.p*100).toFixed(0); big.textContent=pct+'%'; big.className='v '+(f.p>=0.5?'g':f.p>=0.25?'a':'r');
+    meta.innerHTML='confidence: <b>'+f.conf+'</b> ('+f.n+' closed trades)<br>~'+f.ratePerDay+' trades/day expected<br>24h P/L median '+$(f.median)+' · P5 '+$(f.p5)+' · P95 '+$(f.p95); }
+  try{ const cv=document.getElementById('oddschart'),ctx=cv.getContext('2d'); ctx.clearRect(0,0,cv.width,cv.height); const W=cv.width,H=cv.height;
+    const hp=(s.probHist||[]).filter(x=>x.p!=null);
+    if(hp.length>1){ ctx.strokeStyle='#27272a';ctx.beginPath();ctx.moveTo(0,H/2);ctx.lineTo(W,H/2);ctx.stroke();
+      ctx.strokeStyle='#22d3ee';ctx.lineWidth=2;ctx.beginPath();
+      hp.forEach((x,i)=>{const px=i/(hp.length-1)*W,py=H-(x.p*H);i?ctx.lineTo(px,py):ctx.moveTo(px,py);});ctx.stroke();
+      ctx.fillStyle='#71717a';ctx.font='9px monospace';ctx.fillText('100%',2,9);ctx.fillText('0%',2,H-2);}
+    else{ctx.fillStyle='#71717a';ctx.font='11px monospace';ctx.fillText('building history…',8,H/2);} }catch(e){}
   if(s.positions.length){ let h='<table><tr><th>market</th><th>kind</th><th>cost</th><th>locked</th><th>source</th></tr>';
     for(const p of s.positions) h+='<tr><td>'+(p.market||'').slice(0,52)+'</td><td>'+p.kind+'</td><td>'+$(p.cost)+'</td><td>'+(p.locked?$(p.locked):'-')+'</td><td>'+(p.source||'').slice(0,12)+'</td></tr>';
     document.getElementById('postbl').innerHTML=h+'</table>'; } else document.getElementById('postbl').innerHTML='<div style=color:#71717a>no open paper positions yet — waiting for an arb or a followed-wallet buy</div>';
@@ -280,6 +301,7 @@ function closeCopy(s, pos, exitPx, reason){
   }
   // auto-tune the global sizing dial from the rolling result (#3)
   s.copyFracMult = clamp((s.copyFracMult||1) + (pnl>0 ? 0.05 : -0.08), 0.5, 2);
+  s.closedLog = s.closedLog || []; s.closedLog.push({ pnl, ts: Date.now() }); if (s.closedLog.length>500) s.closedLog.shift(); // feeds the 24h forecast
   s.open = s.open.filter(x => x !== pos);
   log(`${cfg.LIVE?'LIVE':'PAPER'} EXIT copy "${(pos.market||'').slice(0,38)}" @${exitPx.toFixed(3)} (${reason}) → P/L ${usd(pnl)} | realized ${usd(s.realizedTotal)}`);
 }
@@ -341,6 +363,38 @@ function startLearnLoop(){
   tick(); setInterval(tick, cfg.SCORE_INTERVAL_MS);
 }
 
+/* ---- CYCLE [BOT] (2026-05-30): honest 24h profit-odds forecast (Monte Carlo over OUR own paper results) ---- */
+function poisson(lambda){ if (lambda<=0) return 0; const L=Math.exp(-lambda); let k=0,p=1; do{ k++; p*=Math.random(); }while(p>L); return k-1; }
+function forecast(s){
+  const logd = s.closedLog || [];
+  const n = logd.length;
+  if (n < 1) return { p:null, conf:'none', n:0, ratePerDay:0, median:0, p5:0, p95:0 };
+  const now = Date.now();
+  const last24 = logd.filter(x=>now-x.ts<=86400000).length;
+  const elapsedDays = Math.max((now - logd[0].ts)/86400000, 1/24);
+  const ratePerDay = last24 > 0 ? last24 : n/elapsedDays;   // expected trades in next 24h
+  const pnls = logd.map(x=>x.pnl);
+  const SIMS = 2000; const dist = new Array(SIMS); let wins = 0;
+  for (let i=0;i<SIMS;i++){
+    const k = poisson(ratePerDay); let tot = 0;
+    for (let j=0;j<k;j++) tot += pnls[(Math.random()*n)|0];
+    dist[i] = tot; if (tot > 0) wins++;
+  }
+  dist.sort((a,b)=>a-b);
+  const p = wins/SIMS;
+  const conf = n>=25 ? 'high' : n>=8 ? 'medium' : 'low';
+  return { p, conf, n, ratePerDay:+ratePerDay.toFixed(2),
+           median:+dist[SIMS>>1].toFixed(2), p5:+dist[(SIMS*0.05)|0].toFixed(2), p95:+dist[(SIMS*0.95)|0].toFixed(2) };
+}
+function startForecastLoop(){
+  const tick = () => { try {
+    const s = loadState(); const f = forecast(s);
+    s.probHist = s.probHist || []; s.probHist.push({ ts: Date.now(), p: f.p, n: f.n }); if (s.probHist.length>240) s.probHist.shift();
+    s.forecast = f; saveState(s);
+  } catch(e){ log('[forecast] '+e.message); } };
+  tick(); setInterval(tick, 60000);
+}
+
 (async function main(){
   log('='.repeat(70));
   log(`Polymarket free-arb bot starting — MODE: ${cfg.LIVE ? '*** LIVE (REAL MONEY) ***' : 'PAPER (dry-run, no orders placed)'}`);
@@ -357,4 +411,5 @@ function startLearnLoop(){
   startCopyLoop(); // smart-money copy runs alongside arb detection
   startLearnLoop(); // self-learning: re-score followed wallets, auto-curate who to copy
   startManageLoop(); // exit logic: mirror whale exits + take-profit/stop, realize P&L (closed loop)
+  startForecastLoop(); // honest 24h profit-odds estimate from our own results
 })();
