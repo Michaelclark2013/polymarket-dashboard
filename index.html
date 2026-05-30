@@ -380,6 +380,12 @@
     <div id="sm_summary" class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs"></div>
     <div id="sm_out" class="text-xs text-zinc-400"></div>
   </div>
+  <!-- #6 top holders / whales per market -->
+  <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4 space-y-2">
+    <div class="text-xs tracking-widest text-zinc-400">TOP HOLDERS (WHALES) IN A MARKET</div>
+    <div class="text-[10px] text-zinc-500">From the Scanner → DISCOVER list, click 🐋 on any market to load its biggest holders per outcome here. Click a whale to inspect their full wallet above.</div>
+    <div id="sm_holders" class="text-xs text-zinc-400"><div class="text-zinc-600">no market selected — use the 🐋 button in Scanner → Discover.</div></div>
+  </div>
 </section>
 
 <!-- =========================================================== -->
@@ -1054,12 +1060,14 @@ function renderDiscovery(){
       <div class="text-[10px] text-zinc-500">YES ${m.yes!=null?cents(m.yes):'--'} · vol $${Math.round(m.vol).toLocaleString()}${d!=null?` · ${d}d`:''}</div></div>
       <button class="text-cyan-300 text-xs shrink-0" data-dsc="${i}">→ analyze</button>
       ${m.tokens&&m.tokens.length>=2?`<button class="text-emerald-400 text-xs shrink-0" data-arb="${i}">arb</button>`:''}
+      ${m.cid?`<button class="text-amber-300 text-xs shrink-0" data-whale="${i}" title="top holders / smart money in this market">🐋</button>`:''}
     </div>`;
   }).join('');
   box.onclick = e => {
-    const di=e.target.dataset.dsc, ai=e.target.dataset.arb;
+    const di=e.target.dataset.dsc, ai=e.target.dataset.arb, wi=e.target.dataset.whale;
     if(di!=null){ const m=list[Number(di)]; $('a_market').value=m.q; if(m.yes!=null)$('a_price').value=m.yes.toFixed(2); const d=daysTo(m.end); if(d!=null)$('a_days').value=Math.max(0,d); showTab('analyzer'); }
     if(ai!=null){ const m=list[Number(ai)]; $('arb_y').value=m.tokens[0]||''; $('arb_n').value=m.tokens[1]||''; runArb(); }
+    if(wi!=null){ const m=list[Number(wi)]; showTab('smartmoney'); showHolders(m.cid, m.q); } // #6 whales
   };
 }
 if($('dsc_load')) $('dsc_load').onclick = async () => {
@@ -1156,6 +1164,23 @@ async function inspectWallet(){
   const actHtml = Array.isArray(act)&&act.length ? `<div class="mt-3 text-[10px] text-zinc-500">RECENT ACTIVITY</div>`+act.slice(0,10).map(a=>`<div class="text-[10px] text-zinc-400 truncate">${new Date((finite(a.timestamp)||0)*1000).toLocaleDateString()} · ${esc(a.type||'')} ${esc((a.title||'').slice(0,50))} ${a.outcome?esc(a.outcome):''} ${finite(a.usdcSize)!=null?usd(finite(a.usdcSize)):''}</div>`).join('') : '';
   out.innerHTML = posHtml + actHtml;
   out.onclick = e=>{ const t=e.target.closest('[data-smmkt]'); if(!t) return; $('a_market').value=t.dataset.smmkt; if(t.dataset.smpx) $('a_price').value=Number(t.dataset.smpx).toFixed(2); showTab('analyzer'); };
+}
+// CYCLE 2 BUILD [DASH] (2026-05-30): #6 top holders / smart money in a specific market
+async function showHolders(cid, question){
+  const box=$('sm_holders'); if(!box) return;
+  if(!cid){ box.innerHTML='<span class="text-amber-400">no conditionId for this market.</span>'; return; }
+  box.innerHTML=`<div class="text-emerald-300">loading top holders for "${esc((question||'').slice(0,60))}"…</div>`;
+  const data=await safeJson(`${DATA_API}/holders?market=${encodeURIComponent(cid)}&limit=10`);
+  if(!Array.isArray(data) || !data.length){ box.innerHTML='<span class="text-amber-400">Holder data unavailable for this market.</span>'; return; }
+  box.innerHTML = `<div class="text-[10px] text-zinc-500 mb-1 truncate">${esc(question||'')}</div>` + data.map((grp,gi)=>{
+    const hs=(grp.holders||[]).slice(0,8);
+    if(!hs.length) return '';
+    return `<div class="mb-2"><div class="text-[10px] tracking-widest text-zinc-400 mb-1">OUTCOME ${grp.holders?.[0]?.outcomeIndex ?? gi} — top holders</div>`+
+      hs.map(h=>{ const nm=h.name||h.pseudonym||h.proxyWallet?.slice(0,10)||'?';
+        return `<div class="flex justify-between gap-2 border-b border-zinc-800/60 py-0.5"><button class="text-cyan-300 truncate text-left flex-1" data-whaddr="${esc(h.proxyWallet||'')}" title="inspect wallet">${esc(nm)}</button><span class="num shrink-0">${Math.round(finite(h.amount)||0).toLocaleString()} sh</span></div>`;
+      }).join('')+`</div>`;
+  }).join('');
+  box.onclick=e=>{ const t=e.target.closest('[data-whaddr]'); if(!t||!t.dataset.whaddr) return; $('sm_addr').value=t.dataset.whaddr; inspectWallet(); window.scrollTo({top:0,behavior:'smooth'}); };
 }
 
 /* ------------------------------ LIVE WS ------------------------------ */
@@ -1465,7 +1490,7 @@ async function loadMarkets(force){
   _marketCache = raw.map(m=>{
     let toks=[]; try{ toks=JSON.parse(m.clobTokenIds||'[]'); }catch{}
     let px=[];  try{ px=JSON.parse(m.outcomePrices||'[]').map(Number); }catch{}
-    return { q:m.question||'(untitled)', tokens:toks, yes:finite(px[0]), no:finite(px[1]),
+    return { q:m.question||'(untitled)', tokens:toks, cid:m.conditionId||'', yes:finite(px[0]), no:finite(px[1]),
              vol:finite(m.volume)||finite(m.volume24hr)||0, end:m.endDate?Date.parse(m.endDate):null,
              spread:finite(m.spread) };
   }).filter(m=>m.q);
