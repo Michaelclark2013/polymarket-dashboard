@@ -13,6 +13,7 @@
     "preflight": "node preflight.js",
     "set-allowance": "node preflight.js --set-allowance",
     "report": "node report.js",
+    "backtest": "node backtest.js",
     "live": "node index.js"
   },
   "comment_paper": "Paper mode needs ZERO install — pure Node 18+ (global fetch).",

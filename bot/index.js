@@ -12,7 +12,8 @@
  * ========================================================================== */
 const fs = require('fs');
 const cfg = require('./config');
-const { getBinaryMarkets, getNegRiskEvents, findBinaryArbs, findMultiArbs, buildArb, getBook } = require('./lib');
+const { getBinaryMarkets, getNegRiskEvents, findBinaryArbs, findMultiArbs, buildArb, getBook, resolvedPrice } = require('./lib');
+const feeCost = (notional, txs=1) => notional*((cfg.FEE_BPS||0)/10000) + (cfg.GAS_USD||0)*txs;
 const { LiveFeed } = require('./feed');
 const { pollFollowed } = require('./copy');
 const { scoreAll, discoverCandidates } = require('./learn');
@@ -170,7 +171,7 @@ async function executeArb(arb, s){
   try {
     const fills = [];
     for (const leg of arb.legs){ fills.push(await buyLeg(leg.token, leg.price, arb.pairs)); }
-    s.open.push({ market: arb.market, kind: arb.kind, legs: arb.legs.map(l=>({token:l.token,label:l.label,price:l.price})),
+    s.open.push({ market: arb.market, kind: arb.kind, cid: arb.cid||'', legs: arb.legs.map(l=>({token:l.token,label:l.label,price:l.price})),
                   pairs: arb.pairs, cost: arb.cost, lockedProfit: arb.lockedProfit, openedAt: Date.now(), mode: tag, fills });
     s.trades++;
     saveState(s);
@@ -213,7 +214,7 @@ async function runWithFeed(){
     const markets = await getBinaryMarkets(cfg.MARKET_SCAN_LIMIT) || [];
     const events  = await getNegRiskEvents(Math.min(60, cfg.MARKET_SCAN_LIMIT)) || [];
     groups = [
-      ...markets.map(m=>({ kind:'binary', q:m.q, legs:[{token:m.yes,label:'YES'},{token:m.no,label:'NO'}] })),
+      ...markets.map(m=>({ kind:'binary', q:m.q, cid:m.cid||'', legs:[{token:m.yes,label:'YES'},{token:m.no,label:'NO'}] })),
       ...events.map(e=>({ kind:'multi', q:e.q, legs:e.legs.map(l=>({token:l.token,label:l.label})) }))
     ];
     tokenGroups = new Map();
@@ -228,6 +229,7 @@ async function runWithFeed(){
       const legBooks = g.legs.map(l=>({ token:l.token, label:l.label, book: feed.getBook(l.token) }));
       const arb = buildArb(g.kind, g.q, legBooks);
       if (!arb) continue;
+      arb.cid = g.cid || '';
       lastActed.set(g.q, Date.now());
       const s = loadState();
       if (s.killed) return;
@@ -281,39 +283,49 @@ async function mirrorCopy(sig){
   log(`${tag} COPY ← ${sig.wallet.slice(0,10)} BUY "${(sig.title||'').slice(0,38)}" ${sig.outcome} entry@${entry.toFixed(3)} | ${Math.round(shares)} sh ($${cost.toFixed(2)}) w${weight.toFixed(2)}×${fracMult.toFixed(2)}`);
   try {
     const fill = await buyLeg(sig.token, entry, shares);
-    s.open.push({ market: `COPY:${sig.title}`, kind:'copy', source: sig.wallet, token: sig.token,
+    s.open.push({ market: `COPY:${sig.title}`, kind:'copy', source: sig.wallet, token: sig.token, cid: sig.conditionId||'',
                   legs:[{token:sig.token,label:sig.outcome,price:entry}], entry,
                   pairs: Math.round(shares), shares: Math.round(shares), cost, lockedProfit: 0, openedAt: Date.now(), mode: tag, fills:[fill] });
     s.trades++; saveState(s);
     log(`${tag} copy filled. open=${s.open.length} exposure=${usd(exposure(s))}`);
   } catch(e){ log(`[copy] execution error: ${e.message}`); s.killed=true; saveState(s); }
 }
-// EXIT (#1): realize a paper position at a given exit price, attribute result to its source wallet (closed loop)
-function closeCopy(s, pos, exitPx, reason){
-  const shares = pos.shares || pos.pairs || 0;
-  const pnl = (exitPx - pos.entry) * shares;             // long a single outcome
+// shared close: book realized P&L (net of fees #2), attribute to source, feed forecast, remove
+function bookClose(s, pos, pnl, reason){
+  pnl -= feeCost((pos.cost||0) + Math.max(0,pnl) + (pos.cost||0), 2); // fees on entry+exit notional
   s.realizedTotal = (s.realizedTotal||0) + pnl;
   s.dailyRealized = (s.dailyRealized||0) + pnl;
   if (pos.source){
     s.copyStats = s.copyStats || {};
     const cs = s.copyStats[pos.source] = s.copyStats[pos.source] || { realized:0, cost:0, n:0, wins:0 };
     cs.realized += pnl; cs.cost += pos.cost||0; cs.n++; if (pnl>0) cs.wins++;
+    s.copyFracMult = clamp((s.copyFracMult||1) + (pnl>0 ? 0.05 : -0.08), 0.5, 2); // auto-tune sizing
   }
-  // auto-tune the global sizing dial from the rolling result (#3)
-  s.copyFracMult = clamp((s.copyFracMult||1) + (pnl>0 ? 0.05 : -0.08), 0.5, 2);
-  s.closedLog = s.closedLog || []; s.closedLog.push({ pnl, ts: Date.now() }); if (s.closedLog.length>500) s.closedLog.shift(); // feeds the 24h forecast
+  s.closedLog = s.closedLog || []; s.closedLog.push({ pnl, ts: Date.now() }); if (s.closedLog.length>500) s.closedLog.shift();
   s.open = s.open.filter(x => x !== pos);
-  log(`${cfg.LIVE?'LIVE':'PAPER'} EXIT copy "${(pos.market||'').slice(0,38)}" @${exitPx.toFixed(3)} (${reason}) → P/L ${usd(pnl)} | realized ${usd(s.realizedTotal)}`);
+  log(`${cfg.LIVE?'LIVE':'PAPER'} EXIT ${pos.kind} "${(pos.market||'').slice(0,36)}" (${reason}) → net P/L ${usd(pnl)} | realized ${usd(s.realizedTotal)}`);
 }
-// mirror whale exits + take-profit/stop on open copy positions
+// EXIT (#1): realize a copy position at an exit price
+function closeCopy(s, pos, exitPx, reason){ bookClose(s, pos, (exitPx - pos.entry) * (pos.shares||pos.pairs||0), reason); }
+// mirror whale exits + take-profit/stop + RESOLUTION settlement (real $1/$0)
 async function manageOpen(){
-  const s = loadState(); if (s.killed) return;
-  const copies = (s.open||[]).filter(p => p.kind === 'copy');
-  if (!copies.length) return;
+  const s = loadState(); if (s.killed || !(s.open||[]).length) return;
   let changed = false;
-  for (const p of copies){
-    const b = await getBook(p.token);
-    const bid = b && b.bids[0] ? b.bids[0].price : null;
+  for (const p of [...s.open]){
+    // RESOLUTION (#1): if the market settled, book the real outcome and skip MTM
+    if (p.cid){
+      try {
+        if (p.kind === 'copy'){
+          const rp = await resolvedPrice(p.cid, p.token);
+          if (rp != null){ closeCopy(s, p, rp, `resolved ${rp?'WON':'LOST'}`); changed = true; continue; }
+        } else if (p.kind === 'binary'){ // arb basket: exactly one leg pays $1 → realize locked profit
+          const { getClobMarket } = require('./lib'); const m = await getClobMarket(p.cid);
+          if (m && m.closed){ bookClose(s, p, p.lockedProfit||0, 'resolved (arb settled)'); changed = true; continue; }
+        }
+      } catch {}
+    }
+    if (p.kind !== 'copy') continue;
+    const b = await getBook(p.token); const bid = b && b.bids[0] ? b.bids[0].price : null;
     if (bid == null) continue;
     const roi = p.entry>0 ? (bid - p.entry)/p.entry : 0;
     if (roi >= cfg.COPY_TP_PCT){ closeCopy(s, p, bid, `take-profit +${(roi*100).toFixed(0)}%`); changed = true; }

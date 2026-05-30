@@ -16,6 +16,8 @@ const config = {
   CONFIRM_LIVE: process.env.CONFIRM_LIVE || '',           // must equal 'I_UNDERSTAND' to allow live orders
 
   // --- strategy: free arbitrage (YES-ask + NO-ask < $1) ---
+  FEE_BPS: num(process.env.FEE_BPS, 0),                  // trading fee in bps (Polymarket ~0; configurable for honesty)
+  GAS_USD: num(process.env.GAS_USD, 0.02),               // approx cost per fill (entry+exit each charged)
   MIN_EDGE_CENTS: num(process.env.MIN_EDGE_CENTS, 1.0),   // require >= this edge (¢) after the buffer below, to cover fees/slippage
   EDGE_BUFFER_CENTS: num(process.env.EDGE_BUFFER_CENTS, 0.5), // safety haircut subtracted from raw edge
   MARKET_SCAN_LIMIT: num(process.env.MARKET_SCAN_LIMIT, 150), // how many top-by-volume markets to scan per cycle

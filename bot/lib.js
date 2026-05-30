@@ -16,7 +16,7 @@ async function getBinaryMarkets(limit){
   for (const m of raw){
     let toks = []; try { toks = JSON.parse(m.clobTokenIds || '[]'); } catch {}
     if (!Array.isArray(toks) || toks.length !== 2) continue;
-    out.push({ q: m.question || '(untitled)', yes: toks[0], no: toks[1] });
+    out.push({ q: m.question || '(untitled)', yes: toks[0], no: toks[1], cid: m.conditionId || '' });
   }
   return out;
 }
@@ -95,4 +95,20 @@ async function findMultiArbs(events){
   return arbs;
 }
 
-module.exports = { safeJson, getBinaryMarkets, getNegRiskEvents, getBook, walk, buildArb, findBinaryArbs, findMultiArbs };
+// CYCLE [BOT] (2026-05-30): market resolution status (real $1/$0 settlement) via CLOB.
+async function getClobMarket(conditionId){
+  if (!conditionId) return null;
+  const d = await safeJson(`${cfg.CLOB_API_URL}/markets/${encodeURIComponent(conditionId)}`);
+  if (!d) return null;
+  return { closed: !!d.closed, tokens: (d.tokens||[]).map(t=>({ token_id: String(t.token_id), winner: !!t.winner, price: fin(t.price), outcome: t.outcome })) };
+}
+// resolved exit price for a specific token: 1 if it won, 0 if it lost, null if not resolved/unknown
+async function resolvedPrice(conditionId, token){
+  const m = await getClobMarket(conditionId);
+  if (!m || !m.closed) return null;
+  const t = m.tokens.find(x=>x.token_id===String(token));
+  if (!t) return null;
+  return t.winner ? 1 : 0;
+}
+
+module.exports = { safeJson, getBinaryMarkets, getNegRiskEvents, getBook, walk, buildArb, findBinaryArbs, findMultiArbs, getClobMarket, resolvedPrice };
