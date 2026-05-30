@@ -8,6 +8,17 @@
 5. **[DASH] Alert engine** — user thresholds (edge≥X, free-arb, combinatorial Σ<$1) → toast + log.
 4. **[DASH] Auto cross-venue (Kalshi) reference** for the REF column (graceful fallback + manual).
 
+## BOT "MOST-SUCCESSFUL" BUILDOUT TRACK (follow BOT_BUILDOUT.md — strict priority order)
+Build latency-tolerant edges + execution quality; paper-first; loop never enables live.
+- T2-#4 [BOT] Live WebSocket order feed (replace 15s REST polling; react on-change)  ← NEXT
+- T1-#1 [BOT] Combinatorial multi-leg paper executor (buy neg-risk basket when Σ best-asks<$1) ← NEXT
+- T1-#2 [BOT] Smart-money copy (watch sharp wallets via activity API; mirror new positions, sized down)
+- T1-#3 [BOT] Cross-venue arb (Polymarket vs Kalshi/sportsbooks matching layer)
+- T2-#5 [BOT] Maker-side + liquidity rewards (post resting orders where EV flips positive)
+- T2-#6 [BOT] Reliability: partial-leg recovery, fee+gas EV, fill reconciliation, realized P&L, audit log
+- T3-#7 [BOT] Niche-market model (under-covered sports/politics/weather — durable retail edge)
+AVOID: single-market arb as primary, latency/Chainlink front-running, hype "98% win" patterns.
+
 ## LIVE-READINESS TRACK (ongoing; live path stays GATED + paper-default — loop NEVER enables it)
 SHIPPED: real clob-client signing path (signatureType/funder), preflight.js readiness checker
 (creds + USDC balance + allowance, optional --set-allowance), pre-trade balance/allowance guard,

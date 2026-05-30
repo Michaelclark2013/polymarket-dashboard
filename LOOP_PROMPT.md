@@ -3,6 +3,10 @@
 Run with `/loop` (or as a recurring task). Two surfaces evolve together:
 the **dashboard** (`index.html`) and the **trade bot** (`bot/`).
 
+> **BOT WORK MUST FOLLOW `BOT_BUILDOUT.md`** — the "most-successful bot" doctrine: build
+> latency-tolerant edges + execution quality in strict priority order (Tier 1→2→3), paper-first,
+> loop never enables live. When a cycle picks a [BOT] item, take the next one in that priority.
+
 ```
 Continue the Polymarket Edge Terminal + Arb-Bot SELF-EVOLUTION loop — GROWTH mode (add real,
 money-relevant power; never churn, never fabricate data, never risk funds without explicit
