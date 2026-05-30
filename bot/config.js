@@ -30,6 +30,14 @@ const config = {
   POLL_MS: num(process.env.POLL_MS, 15000),              // scan cadence
   ONCE:    bool(process.env.ONCE, false),               // run a single scan then exit (good for testing)
 
+  // --- smart-money copy (T1-#2): mirror NEW positions of sharp wallets you follow ---
+  // Latency-tolerant edge: a slow client CAN catch these (alpha lives minutes, not ms).
+  FOLLOW_WALLETS: (process.env.FOLLOW_WALLETS||'').split(',').map(s=>s.trim()).filter(Boolean), // 0x addresses
+  COPY_FRACTION: num(process.env.COPY_FRACTION, 0.02),   // size = whale's USDC size × this, clamped to MAX_PER_TRADE_USD
+  COPY_POLL_MS:  num(process.env.COPY_POLL_MS, 20000),   // how often to poll followed wallets' activity
+  COPY_MIN_USDC: num(process.env.COPY_MIN_USDC, 50),     // ignore a whale trade smaller than this (noise)
+  DATA_API_URL:  process.env.DATA_API_URL || 'https://data-api.polymarket.com',
+
   // --- live wallet (only read when going live) ---
   PRIVATE_KEY: process.env.PRIVATE_KEY || '',
   // Signature type: 0 = EOA (a normal wallet whose key you exported and which HOLDS the USDC),

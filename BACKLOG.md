@@ -12,7 +12,7 @@
 Build latency-tolerant edges + execution quality; paper-first; loop never enables live.
 - T2-#4 [BOT] Live WebSocket order feed — DONE (feed.js; event-driven; REST fallback; 86 assets live)
 - T1-#1 [BOT] Combinatorial multi-leg paper executor — DONE (buildArb + executeArb fire on WS book updates) ← NEXT: T1-#2
-- T1-#2 [BOT] Smart-money copy (watch sharp wallets via activity API; mirror new positions, sized down)
+- T1-#2 [BOT] Smart-money copy — DONE (copy.js; mirrors followed wallets new buys, sized-down, paper-safe, caps enforced) <- NEXT: T1-#3 cross-venue or T3-#7 niche model
 - T1-#3 [BOT] Cross-venue arb (Polymarket vs Kalshi/sportsbooks matching layer)
 - T2-#5 [BOT] Maker-side + liquidity rewards (post resting orders where EV flips positive)
 - T2-#6 [BOT] Reliability: partial-leg recovery, fee+gas EV, fill reconciliation, realized P&L, audit log

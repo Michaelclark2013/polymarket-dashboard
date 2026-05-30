@@ -14,6 +14,7 @@ const fs = require('fs');
 const cfg = require('./config');
 const { getBinaryMarkets, getNegRiskEvents, findBinaryArbs, findMultiArbs, buildArb } = require('./lib');
 const { LiveFeed } = require('./feed');
+const { pollFollowed } = require('./copy');
 
 const STATE_FILE = __dirname + '/state.json';
 const todayKey = () => new Date().toISOString().slice(0,10); // UTC day
@@ -152,6 +153,42 @@ async function runWithFeed(){
   return true;
 }
 
+/* ---- CYCLE [BOT] T1-#2 (2026-05-30): smart-money copy — mirror followed wallets' new buys ---- */
+async function mirrorCopy(sig){
+  const s = loadState();
+  if (s.killed) return;
+  if (s.open.length >= cfg.MAX_OPEN_POSITIONS) return log('[copy] max open reached — skip.');
+  // size down: a fraction of the whale's USDC, clamped to the per-trade cap and exposure room
+  const room = Math.max(0, cfg.MAX_EXPOSURE_USD - exposure(s));
+  const usdcTarget = Math.min(sig.usdc * cfg.COPY_FRACTION, cfg.MAX_PER_TRADE_USD, room);
+  if (usdcTarget < 0.5) return; // too small to bother
+  const shares = sig.price>0 ? usdcTarget/sig.price : 0;
+  if (shares < 1) return;
+  const cost = shares*sig.price;
+  const tag = cfg.LIVE ? 'LIVE' : 'PAPER';
+  log(`${tag} COPY ← ${sig.wallet.slice(0,10)} bought "${(sig.title||'').slice(0,40)}" ${sig.outcome} @${sig.price} | mirror ${Math.round(shares)} sh ($${cost.toFixed(2)})`);
+  try {
+    const fill = await buyLeg(sig.token, sig.price, shares); // paper: records; live: signs+posts (gated)
+    s.open.push({ market: `COPY:${sig.title}`, kind:'copy', source: sig.wallet, legs:[{token:sig.token,label:sig.outcome,price:sig.price}],
+                  pairs: Math.round(shares), cost, lockedProfit: 0, openedAt: Date.now(), mode: tag, fills:[fill] });
+    s.trades++; saveState(s);
+    log(`${tag} copy filled. open=${s.open.length} exposure=${usd(exposure(s))}`);
+  } catch(e){ log(`[copy] execution error: ${e.message}`); s.killed=true; saveState(s); }
+}
+function startCopyLoop(){
+  if (!cfg.FOLLOW_WALLETS.length){ log('[copy] no FOLLOW_WALLETS set — add sharp wallets (from the dashboard Smart $ tab) to enable smart-money copy.'); return; }
+  log(`[copy] following ${cfg.FOLLOW_WALLETS.length} wallet(s) · mirror ${(cfg.COPY_FRACTION*100).toFixed(1)}% of their size (capped $${cfg.MAX_PER_TRADE_USD}) · min $${cfg.COPY_MIN_USDC}`);
+  const tick = async () => {
+    try {
+      const s = loadState(); if (s.killed) return;
+      if (cfg.LIVE && !(await ensureLiveReady(s))) return;
+      const r = await pollFollowed(sig => mirrorCopy(sig).catch(e=>log('[copy] '+e.message)));
+      if (r.newSignals) log(`[copy] ${r.newSignals} new signal(s) from ${r.followed} wallet(s)`);
+    } catch(e){ log('[copy] poll error: '+e.message); }
+  };
+  tick(); setInterval(tick, cfg.COPY_POLL_MS);
+}
+
 (async function main(){
   log('='.repeat(70));
   log(`Polymarket free-arb bot starting — MODE: ${cfg.LIVE ? '*** LIVE (REAL MONEY) ***' : 'PAPER (dry-run, no orders placed)'}`);
@@ -159,9 +196,10 @@ async function runWithFeed(){
   if (!cfg.DRY_RUN && !cfg.LIVE) log('WARNING: DRY_RUN=false but live not fully authorized (need CONFIRM_LIVE=I_UNDERSTAND + PRIVATE_KEY). Staying in PAPER mode.');
   log('='.repeat(70));
 
-  if (cfg.ONCE){ await scan(); log('ONCE=true → done.'); return; } // one-shot uses REST scan
+  if (cfg.ONCE){ await scan(); if (cfg.FOLLOW_WALLETS.length){ const s=loadState(); if(!s.killed) await pollFollowed(sig=>mirrorCopy(sig)); } log('ONCE=true → done.'); return; }
   const feedOn = new LiveFeed().available();
   if (feedOn){ log('detection: live WebSocket feed (event-driven).'); await runWithFeed(); }
   else { log('detection: REST polling fallback (install ws for the live feed: cd bot && npm i ws).');
     await scan(); setInterval(()=>{ scan().catch(e=>log('scan error: '+e.message)); }, cfg.POLL_MS); }
+  startCopyLoop(); // smart-money copy runs alongside arb detection
 })();
