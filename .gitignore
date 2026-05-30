@@ -6,3 +6,6 @@ node_modules/
 bot/.env
 bot/state.json
 bot/package-lock.json
+
+# harness runtime
+.claude/scheduled_tasks.lock
