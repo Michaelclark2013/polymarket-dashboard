@@ -71,29 +71,29 @@ function startMonitor(){
 }
 const MONITOR_HTML = `<!doctype html><html><head><meta charset=utf-8><title>Bot Monitor</title>
 <meta name=viewport content="width=device-width,initial-scale=1"><style>
-:root{--bg:#f3efe4;--ink:#0d0d0d;--grn:#138a3e;--red:#c0392b;--amb:#b8860b;--box:#fffdf7}
+:root{--bg:#0a0a0b;--panel:#141417;--ink:#e4e4e7;--line:#2a2a2e;--grn:#22c55e;--red:#ef4444;--amb:#f59e0b}
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font:12px ui-monospace,Menlo,monospace;margin:0;padding:10px}
-.bar{display:flex;align-items:center;gap:14px;border:2px solid var(--ink);background:var(--box);padding:8px 12px;margin-bottom:8px;flex-wrap:wrap}
-.bar .ttl{font-size:18px;font-weight:800;letter-spacing:.05em}.bar .sub{font-size:9px;color:#555;letter-spacing:.12em}
-.bar .tag{font-size:10px;letter-spacing:.16em;color:#333}.clock{margin-left:auto;font-size:15px;font-weight:800}
-.ribbon{display:flex;border:2px solid var(--ink);background:var(--ink);color:var(--box);margin-bottom:8px;flex-wrap:wrap}
-.ribbon div{padding:5px 12px;border-right:1px solid #444;font-size:10px;letter-spacing:.08em}
+.bar{display:flex;align-items:center;gap:14px;border:1px solid var(--line);background:var(--panel);padding:8px 12px;margin-bottom:8px;flex-wrap:wrap}
+.bar .ttl{font-size:18px;font-weight:800;letter-spacing:.05em}.bar .sub{font-size:9px;color:#8a8a8f;letter-spacing:.12em}
+.bar .tag{font-size:10px;letter-spacing:.16em;color:#a1a1aa}.clock{margin-left:auto;font-size:15px;font-weight:800;color:var(--grn)}
+.ribbon{display:flex;border:1px solid var(--line);background:#000;color:var(--ink);margin-bottom:8px;flex-wrap:wrap}
+.ribbon div{padding:5px 12px;border-right:1px solid var(--line);font-size:10px;letter-spacing:.08em}
 .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px}
-.box{border:2px solid var(--ink);background:var(--box);padding:10px 12px}
-.lbl{font-size:9px;letter-spacing:.13em;color:#666}.big{font-size:38px;font-weight:800;line-height:1.05}
+.box{border:1px solid var(--line);background:var(--panel);padding:10px 12px}
+.lbl{font-size:9px;letter-spacing:.13em;color:#8a8a8f}.big{font-size:38px;font-weight:800;line-height:1.05}
 .kpis{display:flex;gap:16px;margin-top:8px;flex-wrap:wrap}.kpis .num{font-size:18px;font-weight:800}
 .g{color:var(--grn)}.r{color:var(--red)}.a{color:var(--amb)}
-.pills{display:flex;gap:6px;border:2px solid var(--ink);background:var(--box);padding:8px;margin-bottom:8px;flex-wrap:wrap}
-.pill{flex:1;min-width:88px;border:1px solid var(--ink);padding:6px 8px;font-size:10px;letter-spacing:.08em;background:#fff}
-.pill.on{background:#6c4ad6;color:#fff;border-color:#6c4ad6}.pill b{display:block;font-size:8px;color:#999}.pill.on b{color:#ddd}
-h2{font-size:11px;letter-spacing:.14em;border:2px solid var(--ink);background:var(--ink);color:var(--box);margin:0 0 6px;padding:5px 10px}
-table{width:100%;border-collapse:collapse;font-size:11px;background:var(--box)}
-td,th{text-align:left;padding:3px 8px;border-bottom:1px solid #e2ddcf}th{font-size:9px;letter-spacing:.08em;color:#555}
-pre{border:2px solid var(--ink);background:#0f0f0f;color:#9fe6b0;padding:8px;height:38vh;overflow:auto;white-space:pre-wrap;font-size:10px;margin:0}
-canvas{background:#fff;border:1px solid var(--ink)}
+.pills{display:flex;gap:6px;border:1px solid var(--line);background:var(--panel);padding:8px;margin-bottom:8px;flex-wrap:wrap}
+.pill{flex:1;min-width:88px;border:1px solid var(--line);padding:6px 8px;font-size:10px;letter-spacing:.08em;background:#1b1b1f}
+.pill.on{background:#6c4ad6;color:#fff;border-color:#6c4ad6}.pill b{display:block;font-size:8px;color:#777}.pill.on b{color:#ddd}
+h2{font-size:11px;letter-spacing:.14em;border:1px solid var(--line);background:#000;color:var(--ink);margin:0 0 6px;padding:5px 10px}
+table{width:100%;border-collapse:collapse;font-size:11px;background:var(--panel)}
+td,th{text-align:left;padding:3px 8px;border-bottom:1px solid var(--line)}th{font-size:9px;letter-spacing:.08em;color:#8a8a8f}
+pre{border:1px solid var(--line);background:#000;color:#9fe6b0;padding:8px;height:38vh;overflow:auto;white-space:pre-wrap;font-size:10px;margin:0}
+canvas{background:#000;border:1px solid var(--line)}
 .bot3{display:grid;grid-template-columns:1.1fr .9fr 1fr;gap:8px}
-.gauge{height:8px;background:#e2ddcf;border:1px solid var(--ink);margin-top:4px}.gauge>div{height:100%;background:var(--grn)}
+.gauge{height:8px;background:#2a2a2e;border:1px solid var(--line);margin-top:4px}.gauge>div{height:100%;background:var(--grn)}
 @media(max-width:760px){.grid,.bot3{grid-template-columns:1fr}}
 </style></head><body>
 <div class=bar><div><div class=ttl>CLAUDE × POLYMARKET</div><div class=sub>ARB · SMART-MONEY COPY · SELF-LEARN AGENT</div></div>
