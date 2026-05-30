@@ -29,6 +29,7 @@ const config = {
   // --- loop ---
   POLL_MS: num(process.env.POLL_MS, 15000),              // scan cadence
   ONCE:    bool(process.env.ONCE, false),               // run a single scan then exit (good for testing)
+  MONITOR_PORT: num(process.env.MONITOR_PORT, 8787),    // live status web page (0 = off)
 
   // --- smart-money copy (T1-#2): mirror NEW positions of sharp wallets you follow ---
   // Latency-tolerant edge: a slow client CAN catch these (alpha lives minutes, not ms).

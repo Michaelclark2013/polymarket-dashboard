@@ -26,7 +26,68 @@ function loadState(){
 function saveState(s){ try { fs.writeFileSync(STATE_FILE, JSON.stringify(s,null,2)); } catch(e){ log('WARN could not persist state: '+e.message); } }
 function exposure(s){ return s.open.reduce((a,p)=>a+p.cost,0); }
 const usd = v => (v<0?'-$':'$') + Math.abs(v).toFixed(2);
-function log(...a){ console.log(`[${new Date().toISOString()}]`, ...a); }
+const recentLogs = []; // ring buffer for the live monitor
+function log(...a){ const line = `[${new Date().toISOString()}] ` + a.join(' '); console.log(line); recentLogs.push(line); if (recentLogs.length>200) recentLogs.shift(); }
+const STATUS = { feed:null, groups:()=>0 }; // populated by runWithFeed
+
+/* ---- CYCLE [BOT] (2026-05-30): built-in live monitor (no deps; Node http) ---- */
+function startMonitor(){
+  if (!cfg.MONITOR_PORT) return;
+  const http = require('http');
+  http.createServer((req,res)=>{
+    if (req.url === '/status'){
+      const s = loadState();
+      const body = JSON.stringify({
+        mode: cfg.LIVE ? 'LIVE' : 'PAPER', killed: !!s.killed,
+        ws: STATUS.feed ? (STATUS.feed.connected?'live':'reconnecting') : 'rest',
+        books: STATUS.feed ? STATUS.feed.bookCount() : 0, groups: STATUS.groups(),
+        wallets: cfg.FOLLOW_WALLETS.length, trades: s.trades||0, open: (s.open||[]).length,
+        exposure: exposure(s), dailyPnl: s.dailyRealized||0,
+        caps: { perTrade: cfg.MAX_PER_TRADE_USD, exposure: cfg.MAX_EXPOSURE_USD, dailyKill: cfg.DAILY_LOSS_KILL_USD, maxOpen: cfg.MAX_OPEN_POSITIONS },
+        positions: (s.open||[]).map(p=>({ market:p.market, kind:p.kind, cost:p.cost, pairs:p.pairs, locked:p.lockedProfit||0, source:p.source||'', when:p.openedAt })),
+        logs: recentLogs.slice(-60)
+      });
+      res.writeHead(200,{'content-type':'application/json','access-control-allow-origin':'*'}); res.end(body); return;
+    }
+    res.writeHead(200,{'content-type':'text/html'}); res.end(MONITOR_HTML);
+  }).listen(cfg.MONITOR_PORT, ()=> log(`[monitor] live status page → http://localhost:${cfg.MONITOR_PORT}`));
+}
+const MONITOR_HTML = `<!doctype html><html><head><meta charset=utf-8><title>Bot Monitor</title>
+<meta name=viewport content="width=device-width,initial-scale=1"><style>
+body{background:#0a0a0b;color:#e4e4e7;font:13px ui-monospace,Menlo,monospace;margin:0;padding:16px}
+.row{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px}
+.card{background:#18181b;border:1px solid #27272a;border-radius:8px;padding:10px 14px;min-width:120px}
+.k{font-size:10px;color:#71717a;letter-spacing:.1em}.v{font-size:20px;font-weight:700;margin-top:2px}
+.g{color:#22c55e}.r{color:#ef4444}.a{color:#f59e0b}.c{color:#22d3ee}
+h1{font-size:14px;letter-spacing:.1em;color:#a1a1aa;margin:0 0 12px}
+pre{background:#000;border:1px solid #27272a;border-radius:8px;padding:10px;max-height:46vh;overflow:auto;white-space:pre-wrap;font-size:11px;color:#a1a1aa}
+table{width:100%;border-collapse:collapse;font-size:12px}td,th{text-align:left;padding:4px 8px;border-bottom:1px solid #27272a}
+.dot{display:inline-block;width:8px;height:8px;border-radius:9px;margin-right:6px}
+</style></head><body>
+<h1>🤖 POLYMARKET BOT — LIVE MONITOR <span id=dot class=dot></span><span id=mode></span></h1>
+<div class=row id=kpis></div>
+<div id=postbl></div>
+<h1 style="margin-top:14px">ACTIVITY LOG</h1><pre id=log>connecting…</pre>
+<script>
+async function tick(){ try{
+  const s=await (await fetch('/status')).json();
+  document.getElementById('mode').textContent=' '+s.mode+(s.killed?' · KILLED':'');
+  document.getElementById('dot').style.background = s.ws==='live'?'#22c55e':(s.ws==='reconnecting'?'#f59e0b':'#71717a');
+  const kpi=(k,v,c)=>'<div class=card><div class=k>'+k+'</div><div class="v '+(c||'')+'">'+v+'</div></div>';
+  const $=n=>'$'+Number(n||0).toFixed(2);
+  document.getElementById('kpis').innerHTML=
+    kpi('WS FEED',s.ws.toUpperCase(),s.ws==='live'?'g':'a')+kpi('BOOKS',s.books,'c')+kpi('GROUPS',s.groups)+
+    kpi('FOLLOWING',s.wallets+' wallets')+kpi('OPEN',s.open+' / '+s.caps.maxOpen)+
+    kpi('EXPOSURE',$(s.exposure)+' / '+$(s.caps.exposure),'a')+kpi('TRADES',s.trades)+
+    kpi('DAILY P/L',$(s.dailyPnl),s.dailyPnl>=0?'g':'r');
+  if(s.positions.length){ let h='<table><tr><th>market</th><th>kind</th><th>cost</th><th>locked</th><th>source</th></tr>';
+    for(const p of s.positions) h+='<tr><td>'+(p.market||'').slice(0,52)+'</td><td>'+p.kind+'</td><td>'+$(p.cost)+'</td><td>'+(p.locked?$(p.locked):'-')+'</td><td>'+(p.source||'').slice(0,12)+'</td></tr>';
+    document.getElementById('postbl').innerHTML=h+'</table>'; } else document.getElementById('postbl').innerHTML='<div style=color:#71717a>no open paper positions yet — waiting for an arb or a followed-wallet buy</div>';
+  document.getElementById('log').textContent=s.logs.join('\\n');
+  document.getElementById('log').scrollTop=1e9;
+}catch(e){ document.getElementById('log').textContent='monitor offline: '+e.message; } }
+tick(); setInterval(tick,2000);
+</script></body></html>`;
 
 let liveClient = null;
 async function getLiveClient(){
@@ -146,6 +207,7 @@ async function runWithFeed(){
       await executeArb(arb, s);
     }
   };
+  STATUS.feed = feed; STATUS.groups = ()=>groups.length; // expose to the live monitor
   await refreshGroups();
   if (!feed.connect()) return false;            // ws unavailable → caller falls back to REST
   setInterval(()=>refreshGroups().catch(e=>log('refresh error: '+e.message)), 60000);
@@ -197,6 +259,7 @@ function startCopyLoop(){
   log('='.repeat(70));
 
   if (cfg.ONCE){ await scan(); if (cfg.FOLLOW_WALLETS.length){ const s=loadState(); if(!s.killed) await pollFollowed(sig=>mirrorCopy(sig)); } log('ONCE=true → done.'); return; }
+  startMonitor(); // live status web page
   const feedOn = new LiveFeed().available();
   if (feedOn){ log('detection: live WebSocket feed (event-driven).'); await runWithFeed(); }
   else { log('detection: REST polling fallback (install ws for the live feed: cd bot && npm i ws).');
