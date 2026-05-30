@@ -51,7 +51,7 @@
       </div>
       <div class="px-3 py-1.5 rounded border border-zinc-800 bg-zinc-900">
         <span class="text-zinc-500">BANKROLL</span>
-        <input id="bankroll" type="number" class="bg-transparent w-24 text-right outline-none text-emerald-400 font-bold" />
+        <input id="bankroll" type="number" aria-label="Bankroll" class="bg-transparent w-24 text-right outline-none text-emerald-400 font-bold" />
       </div>
       <button id="resetData" class="px-2 py-1.5 rounded border border-zinc-800 hover:border-red-500/50 text-zinc-400 hover:text-red-400">reset</button>
     </div>
@@ -140,7 +140,7 @@
       <div id="o_edgeBox" class="rounded border border-zinc-800 bg-zinc-900/40 p-4">
         <div class="text-[10px] tracking-widest text-zinc-500">RAW EDGE (¢)</div>
         <div id="o_edge" class="text-4xl font-bold num">--</div>
-        <div class="text-[10px] text-zinc-500 mt-1">EV per $1: <span id="o_ev">--</span></div>
+        <div class="text-[10px] text-zinc-500 mt-1">EV per share: <span id="o_ev">--</span></div>
       </div>
       <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4">
         <div class="text-[10px] tracking-widest text-zinc-500">VERDICT</div>
@@ -313,9 +313,9 @@
     <div class="flex items-center gap-2 flex-wrap">
       <div class="text-xs tracking-widest text-zinc-400">LIVE MARKETS (Polymarket CLOB WebSocket)</div>
       <span class="text-[10px] text-zinc-500">paste token_id (asset_id) of a market outcome — find via clob.polymarket.com/markets</span>
-      <div class="ml-auto flex gap-2 text-xs">
-        <input id="lv_tok" placeholder="token_id" class="w-80 bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/>
-        <input id="lv_label" placeholder="label (optional)" class="w-40 bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/>
+      <div class="ml-auto flex flex-wrap gap-2 text-xs">
+        <input id="lv_tok" placeholder="token_id" aria-label="Market token_id" class="w-full sm:w-80 bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/>
+        <input id="lv_label" placeholder="label (optional)" aria-label="Market label" class="w-full sm:w-40 bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5"/>
         <button id="lv_add" class="px-3 py-1.5 rounded bg-emerald-500 text-zinc-950 font-bold">+ SUB</button>
       </div>
     </div>
@@ -366,8 +366,10 @@ const DEFAULT_STATE = {
 
 let state = load();
 function load(){ try { const r = JSON.parse(localStorage.getItem(LS_KEY)); return r ? deepMerge(structuredClone(DEFAULT_STATE), r) : structuredClone(DEFAULT_STATE); } catch { return structuredClone(DEFAULT_STATE);} }
-function save(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
-function deepMerge(a,b){ for (const k of Object.keys(b)) { if (Array.isArray(b[k])) a[k]=b[k]; else if (b[k]&&typeof b[k]==='object') a[k]=deepMerge(a[k]||{}, b[k]); else a[k]=b[k]; } return a; }
+// CYCLE 1 [RESILIENCE] (2026-05-29): setItem throws on quota / Safari private mode — don't abort the calling handler
+function save(){ try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch(e){} }
+// CYCLE 1 [SECURITY] (2026-05-29): skip __proto__/constructor/prototype — block prototype pollution from crafted localStorage
+function deepMerge(a,b){ for (const k of Object.keys(b)) { if (k==='__proto__'||k==='constructor'||k==='prototype') continue; if (Array.isArray(b[k])) a[k]=b[k]; else if (b[k]&&typeof b[k]==='object') a[k]=deepMerge(a[k]||{}, b[k]); else a[k]=b[k]; } return a; }
 
 /* ------------------------------ TABS ------------------------------ */
 const TABS = [
@@ -419,7 +421,7 @@ function renderAnalyzer(){
     const row=document.createElement('div');
     row.className='grid grid-cols-12 gap-2 items-center text-xs';
     row.innerHTML = `
-      <input class="col-span-5 bg-zinc-950 border border-zinc-800 rounded px-2 py-1" value="${f.name}" data-i="${i}" data-k="name"/>
+      <input class="col-span-5 bg-zinc-950 border border-zinc-800 rounded px-2 py-1" value="${esc(f.name)}" data-i="${i}" data-k="name"/>
       <div class="col-span-3 flex items-center gap-2">
         <input type="range" min="0" max="1" step="0.01" value="${f.prob}" data-i="${i}" data-k="prob" class="flex-1"/>
         <span class="num w-10 text-right" id="fp_${i}">${pct(f.prob)}</span>
@@ -428,7 +430,7 @@ function renderAnalyzer(){
         <input type="range" min="0" max="1" step="0.01" value="${f.weight}" data-i="${i}" data-k="weight" class="flex-1"/>
         <span class="num w-10 text-right" id="fw_${i}">${pct(f.weight)}</span>
       </div>
-      <button class="col-span-1 text-red-400 hover:text-red-300" data-rm="${i}">×</button>`;
+      <button class="col-span-1 text-red-400 hover:text-red-300" data-rm="${i}" aria-label="Remove factor">×</button>`;
     c.appendChild(row);
   });
   // add row
@@ -583,7 +585,7 @@ function runMC(){
   const edge  = Number($('m_edge').value)/100;
   const priceM = clamp(Number($('m_price').value)/100, 0.02, 0.98);
   const kf    = Number($('m_kf').value);
-  const N     = Number($('m_n').value)||100;
+  const N     = clamp(Math.floor(Number($('m_n').value)||100), 1, 5000); // CYCLE 1 [CORRECTNESS] (2026-05-29): clamp trade count — unbounded N froze/OOM'd the tab
   const S     = Math.min(Number($('m_sims').value)||200, 2000);
   const p = clamp(priceM + edge, 0.01, 0.99);
   const b = (1-priceM)/priceM;
@@ -815,7 +817,7 @@ function renderScanner(){
         <td class="text-center">${r.conf}%</td>
         <td class="text-center">${r.days}</td>
         <td class="text-center font-bold ${ok?'text-emerald-400':'text-zinc-400'}">${r.score.toFixed(2)}</td>
-        <td class="text-center"><button class="text-cyan-300" data-sc="${r._i}">→ analyze</button> <button class="text-red-400 ml-2" data-rm="${r._i}">×</button></td>`;
+        <td class="text-center"><button class="text-cyan-300" data-sc="${r._i}">→ analyze</button> <button class="text-red-400 ml-2" data-rm="${r._i}" aria-label="Remove scanner row">×</button></td>`;
       rows.appendChild(tr);
     });
   rows.onclick = e => {
@@ -886,8 +888,11 @@ function handleWsMsg(m){
   const sub = state.live.find(x=>x.tokenId===id);
   if (!sub) return;
   if (m.event_type === 'book'){
-    sub.bids = (m.bids||[]).map(x=>({price:Number(x.price), size:Number(x.size)})).sort((a,b)=>b.price-a.price);
-    sub.asks = (m.asks||[]).map(x=>({price:Number(x.price), size:Number(x.size)})).sort((a,b)=>a.price-b.price);
+    // CYCLE 1 [DATA-INTEGRITY] (2026-05-29): drop non-finite levels (NaN mid corrupts portfolio P&L via 4s sync) + cap unbounded depth
+    const lvl = x => ({price:Number(x.price), size:Number(x.size)});
+    const fin = l => Number.isFinite(l.price) && Number.isFinite(l.size);
+    sub.bids = (m.bids||[]).map(lvl).filter(fin).sort((a,b)=>b.price-a.price).slice(0,200);
+    sub.asks = (m.asks||[]).map(lvl).filter(fin).sort((a,b)=>a.price-b.price).slice(0,200);
     if (sub.bids[0]) sub.best_bid = sub.bids[0].price;
     if (sub.asks[0]) sub.best_ask = sub.asks[0].price;
     if (sub.best_bid && sub.best_ask) sub.mid = (sub.best_bid+sub.best_ask)/2;
@@ -896,18 +901,22 @@ function handleWsMsg(m){
       const side = ch.side==='BUY'?'bids':'asks';
       const arr = sub[side] || (sub[side]=[]);
       const price=Number(ch.price), size=Number(ch.size);
+      if (!Number.isFinite(price) || !Number.isFinite(size)) return; // CYCLE 1 [DATA-INTEGRITY] (2026-05-29): ignore malformed level
       const idx = arr.findIndex(x=>x.price===price);
       if (size===0){ if (idx>=0) arr.splice(idx,1); }
       else { if (idx>=0) arr[idx].size=size; else arr.push({price,size}); }
       arr.sort((a,b)=> side==='bids' ? b.price-a.price : a.price-b.price);
+      if (arr.length>200) arr.length=200; // CYCLE 1 [DATA-INTEGRITY] (2026-05-29): cap unbounded book growth
     });
     if (sub.bids?.[0]) sub.best_bid = sub.bids[0].price;
     if (sub.asks?.[0]) sub.best_ask = sub.asks[0].price;
     if (sub.best_bid && sub.best_ask) sub.mid = (sub.best_bid+sub.best_ask)/2;
   } else if (m.event_type === 'last_trade_price'){
-    sub.last = Number(m.price);
+    const lp = Number(m.price);
+    if (!Number.isFinite(lp)) return; // CYCLE 1 [DATA-INTEGRITY] (2026-05-29): ignore malformed trade price
+    sub.last = lp;
     sub.trades = sub.trades || [];
-    sub.trades.unshift({ price:Number(m.price), size:Number(m.size||0), side:m.side, t:Date.now() });
+    sub.trades.unshift({ price:lp, size:Number(m.size)||0, side:m.side, t:Date.now() });
     sub.trades = sub.trades.slice(0,40);
   }
   save();
@@ -950,7 +959,7 @@ function liveCardHtml(s, i){
         <div class="text-sm font-bold truncate">${esc(s.label||'unnamed')}</div>
         <div class="text-[10px] text-zinc-500 truncate">${esc(s.tokenId)}</div>
       </div>
-      <button class="text-red-400 text-xs" data-lvrm="${i}">×</button>
+      <button class="text-red-400 text-xs" data-lvrm="${i}" aria-label="Remove subscription">×</button>
     </div>
     <div class="grid grid-cols-4 gap-2 text-xs">
       <div><div class="text-[10px] text-zinc-500">BID</div><div class="text-emerald-400 num">${s.best_bid?cents(s.best_bid):'--'}</div></div>
