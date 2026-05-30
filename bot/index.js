@@ -443,6 +443,12 @@ async function manageOpen(){
         }
       } catch {}
     }
+    // STALE-ARB SETTLE (2026-05-30): arb baskets (binary OR multi) pay their locked profit at
+    // resolution regardless of outcome. cid-less/multi orphans can't auto-resolve, so once an arb
+    // is well past typical resolution, settle it at locked profit so it never strands & inflates exposure.
+    if ((p.kind === 'binary' || p.kind === 'multi') && (Date.now() - (p.openedAt||0)) > (cfg.ARB_MAX_HOLD_H||12)*3600000){
+      bookClose(s, p, p.lockedProfit||0, 'stale arb settled (locked profit, no live resolution)'); changed = true; continue;
+    }
     if (p.kind !== 'copy') continue;
     const b = await getBook(p.token); const bid = b && b.bids[0] ? b.bids[0].price : null;
     if (bid == null) continue;

@@ -52,6 +52,7 @@ const config = {
   COPY_TP_PCT:   num(process.env.COPY_TP_PCT, 0.25),    // take profit at +25% mark-to-market
   COPY_STOP_PCT: num(process.env.COPY_STOP_PCT, 0.40),  // stop loss at -40% mark-to-market
   MANAGE_MS:     num(process.env.MANAGE_MS, 15000),     // how often to mark-to-market + apply exits
+  ARB_MAX_HOLD_H: num(process.env.ARB_MAX_HOLD_H, 12),  // settle a stale arb basket at locked profit after this many hours (prevents orphans)
   COPY_CHASE_MAX: num(process.env.COPY_CHASE_MAX, 0.05),// don't mirror if current ask > whale entry × (1+this)
   FOLLOW_MAX:    num(process.env.FOLLOW_MAX, 15),       // auto-follow the top-N scored wallets
   DISCOVER_MARKETS: num(process.env.DISCOVER_MARKETS, 15), // markets to scan for candidate wallets
