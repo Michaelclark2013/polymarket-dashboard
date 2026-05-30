@@ -17,17 +17,47 @@ const feeCost = (notional, txs=1) => notional*((cfg.FEE_BPS||0)/10000) + (cfg.GA
 const { LiveFeed } = require('./feed');
 const { pollFollowed } = require('./copy');
 const { scoreAll, discoverCandidates } = require('./learn');
+const { scanWeather } = require('./weather');
 
-const STATE_FILE = __dirname + '/state.json';
+const STATE_FILE = process.env.STATE_FILE || __dirname + '/state.json'; // override for isolated tests
 const todayKey = () => new Date().toISOString().slice(0,10); // UTC day
 
 function loadState(){
-  try { const s = JSON.parse(fs.readFileSync(STATE_FILE,'utf8')); if (s.day !== todayKey()){ s.day = todayKey(); s.dailyRealized = 0; s.killed = false; } return s; }
-  catch { return { day: todayKey(), dailyRealized: 0, killed: false, open: [], realizedTotal: 0, trades: 0 }; }
+  try { const s = JSON.parse(fs.readFileSync(STATE_FILE,'utf8')); if (s.day !== todayKey()){ s.day = todayKey(); s.dailyRealized = 0; s.killed = false; }
+    if (s.startedAt == null) s.startedAt = Date.now();              // start the goal clock on first sight
+    if (s.startCapital == null) s.startCapital = cfg.START_CAPITAL; // lock the seed so the goalposts can't move
+    return s; }
+  catch { return { day: todayKey(), dailyRealized: 0, killed: false, open: [], realizedTotal: 0, trades: 0, startedAt: Date.now(), startCapital: cfg.START_CAPITAL }; }
 }
 function saveState(s){ try { fs.writeFileSync(STATE_FILE, JSON.stringify(s,null,2)); } catch(e){ log('WARN could not persist state: '+e.message); } }
 function exposure(s){ return s.open.reduce((a,p)=>a+p.cost,0); }
 const usd = v => (v<0?'-$':'$') + Math.abs(v).toFixed(2);
+const clamp = (v,lo,hi)=>Math.max(lo,Math.min(hi,v)); // FIX (2026-05-30): was undefined → silently killed every copy trade
+
+/* ---- CYCLE [BOT] (2026-05-30): real bankroll model — the account COMPOUNDS from START_CAPITAL.
+ * equity = seed + realized P&L. Effective caps are the SMALLER of the absolute ceiling and a
+ * bankroll-derived size, so we (a) never deploy cash we don't have, (b) grow bet size as we win. */
+function equity(s){ return (s.startCapital != null ? s.startCapital : cfg.START_CAPITAL) + (s.realizedTotal||0); }
+function caps(s){
+  const eq = Math.max(0, equity(s));
+  return {
+    exposure: Math.min(cfg.MAX_EXPOSURE_USD, eq),                       // can't risk more than the bankroll holds
+    perTrade: Math.min(cfg.MAX_PER_TRADE_USD, eq * cfg.PER_TRADE_FRACTION),
+  };
+}
+// Honest progress toward the goal — NO fabrication. Required vs actual compounding rate + truthful ETA.
+function goalProgress(s){
+  const eq = equity(s), start = (s.startCapital != null ? s.startCapital : cfg.START_CAPITAL), goal = cfg.GOAL_USD;
+  const daysElapsed = Math.max((Date.now() - (s.startedAt||Date.now()))/86400000, 0);
+  const daysLeft = Math.max(cfg.GOAL_DAYS - daysElapsed, 0);
+  const reqDaily  = (daysLeft>0 && eq>0)        ? Math.pow(goal/eq, 1/daysLeft)-1 : null; // needed from here
+  const gotDaily  = (daysElapsed>=1 && start>0) ? Math.pow(eq/start, 1/daysElapsed)-1 : null; // actual so far
+  let etaDays = null;
+  if (gotDaily!=null && gotDaily>0 && eq>0 && eq<goal) etaDays = Math.log(goal/eq)/Math.log(1+gotDaily);
+  return { equity:+eq.toFixed(2), start, goal, pct: goal>0?eq/goal:0,
+           daysElapsed:+daysElapsed.toFixed(2), daysLeft:+daysLeft.toFixed(1),
+           reqDaily, gotDaily, etaDays, onTrack: (gotDaily!=null && reqDaily!=null && gotDaily>=reqDaily) };
+}
 const recentLogs = []; // ring buffer for the live monitor
 function log(...a){ const line = `[${new Date().toISOString()}] ` + a.join(' '); console.log(line); recentLogs.push(line); if (recentLogs.length>200) recentLogs.shift(); }
 const STATUS = { feed:null, groups:()=>0 }; // populated by runWithFeed
@@ -58,10 +88,12 @@ function startMonitor(){
         wallets: (Array.isArray(s.activeWallets)&&s.activeWallets.length) ? s.activeWallets.length : cfg.FOLLOW_WALLETS.length, trades: s.trades||0, open: (s.open||[]).length,
         closed: cl.length, winRate, sharpe, bestWin, pnlSeries: pnlSeries.slice(-80),
         exposure: exposure(s), dailyPnl: s.dailyRealized||0, realized: s.realizedTotal||0, copyFracMult: s.copyFracMult||1,
-        caps: { perTrade: cfg.MAX_PER_TRADE_USD, exposure: cfg.MAX_EXPOSURE_USD, dailyKill: cfg.DAILY_LOSS_KILL_USD, maxOpen: cfg.MAX_OPEN_POSITIONS },
+        equity: equity(s), goal: goalProgress(s),
+        caps: { perTrade: caps(s).perTrade, exposure: caps(s).exposure, dailyKill: cfg.DAILY_LOSS_KILL_USD, maxOpen: cfg.MAX_OPEN_POSITIONS },
         positions: (s.open||[]).map(p=>({ market:p.market, kind:p.kind, cost:p.cost, pairs:p.pairs, locked:p.lockedProfit||0, source:p.source||'', when:p.openedAt })),
         scores: Object.entries(s.walletScores||{}).map(([w,v])=>({ w, winRate:v.winRate, pnl:v.pnl, n:v.n, weight:v.weight })).sort((a,b)=>b.weight-a.weight),
         forecast: s.forecast || forecast(s), probHist: (s.probHist||[]).map(x=>({t:x.ts, p:x.p})),
+        weatherEdges: s.weatherEdges || [], weatherCheckedAt: s.weatherCheckedAt || null,
         logs: recentLogs.slice(-60)
       });
       res.writeHead(200,{'content-type':'application/json','access-control-allow-origin':'*'}); res.end(body); return;
@@ -99,6 +131,17 @@ canvas{background:#000;border:1px solid var(--line)}
 <div class=bar><div><div class=ttl>CLAUDE × POLYMARKET</div><div class=sub>ARB · SMART-MONEY COPY · SELF-LEARN AGENT</div></div>
   <div class=tag>KELLY-CAPPED · ON-CHAIN DATA · PAPER</div><div class=clock id=clock>--:--:-- UTC</div></div>
 <div class=ribbon id=ribbon></div>
+<div class=box style="margin-bottom:8px;border-color:#6c4ad6">
+  <div class=lbl>🎯 GOAL · $20 → $1,000,000 IN 365 DAYS — honest tracker, real equity only (no fabrication)</div>
+  <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:baseline;margin-top:5px">
+    <div><span class=lbl>EQUITY </span><span class=num id=g_eq>—</span></div>
+    <div><span class=lbl>OF GOAL </span><span class=num id=g_pct>—</span></div>
+    <div><span class=lbl>DAY </span><span class=num id=g_day>—</span></div>
+    <div><span class=lbl>NEED/DAY </span><span class=num id=g_req>—</span></div>
+    <div><span class=lbl>ACTUAL/DAY </span><span class=num id=g_got>—</span></div>
+    <div><span class=lbl>ETA@RATE </span><span class=num id=g_eta>—</span></div>
+  </div>
+  <div class=gauge style=margin-top:6px><div id=g_bar style="width:0%;background:#6c4ad6"></div></div></div>
 <div class=grid>
   <div class=box><div class=lbl>PAPER ACCOUNT · REALIZED PnL</div><div class=big id=pnlbig>$0</div>
     <div class=kpis>
@@ -119,6 +162,8 @@ canvas{background:#000;border:1px solid var(--line)}
   <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:4px">
     <div class=big id=oddsbig>—</div><div id=oddsmeta style="font-size:10px;color:#555"></div>
     <canvas id=oddschart width=420 height=58 style="flex:1;min-width:220px"></canvas></div></div>
+<div class=box style=margin-bottom:8px><div class=lbl>🌤 WEATHER EDGE · Kalshi high-temp vs Open-Meteo forecast (research — separate venue, not auto-traded) <span id=wxmeta style=color:#666></span></div>
+  <div id=wxtbl style=color:#666;margin-top:4px>checking…</div></div>
 <div class=bot3>
   <div><h2>⚡ TRADE LOG · LIVE</h2><pre id=log>connecting…</pre></div>
   <div><h2>OPEN POSITIONS</h2><div id=postbl></div></div>
@@ -141,6 +186,14 @@ async function tick(){ try{
     '<div><b>'+s.mode+(s.killed?' · KILLED':'')+'</b></div>','<div>WS '+s.ws.toUpperCase()+'</div>',
     '<div>FOLLOWING '+s.wallets+'</div>','<div>TRADES '+s.trades+'</div>','<div>OPEN '+s.open+'/'+s.caps.maxOpen+'</div>',
     '<div>DAILY '+$n(s.dailyPnl)+'</div>','<div>EXPOSURE '+$n(s.exposure)+'/'+$n(s.caps.exposure)+'</div>'].join('');
+  const g=s.goal||{};
+  document.getElementById('g_eq').textContent=$n(s.equity!=null?s.equity:(g.equity||0));
+  document.getElementById('g_pct').textContent=g.pct!=null?(g.pct*100).toFixed(4)+'%':'—';
+  document.getElementById('g_day').textContent=(g.daysElapsed!=null?g.daysElapsed.toFixed(1):'—')+' / '+(g.daysLeft!=null?Math.round(g.daysElapsed+g.daysLeft):'—');
+  document.getElementById('g_req').textContent=g.reqDaily!=null?'+'+(g.reqDaily*100).toFixed(2)+'%':'—';
+  const gg=document.getElementById('g_got'); gg.textContent=g.gotDaily==null?'collecting…':((g.gotDaily>=0?'+':'')+(g.gotDaily*100).toFixed(2)+'%'); gg.className='num '+(g.onTrack?'g':'r');
+  document.getElementById('g_eta').textContent=g.etaDays==null?'—':(g.etaDays>3650?'>10 yr':(g.etaDays/365).toFixed(1)+' yr');
+  document.getElementById('g_bar').style.width=Math.min(100,(g.pct||0)*100)+'%';
   const pb=document.getElementById('pnlbig'); pb.textContent=$n(s.realized); pb.className='big '+(s.realized>=0?'g':'r');
   document.getElementById('k_closed').textContent=s.closed;
   document.getElementById('k_win').textContent=s.winRate==null?'—':(s.winRate*100).toFixed(0)+'%';
@@ -166,6 +219,13 @@ async function tick(){ try{
   if(s.scores&&s.scores.length){ let h='<table><tr><th>WALLET</th><th>WIN</th><th>PnL</th><th>W</th></tr>';
     for(const w of s.scores.slice(0,10)){ const ok=w.weight>0; h+='<tr><td>'+w.w.slice(0,10)+'…</td><td>'+(w.winRate*100).toFixed(0)+'%</td><td class="'+(w.pnl>=0?'g':'r')+'">'+$n(w.pnl)+'</td><td class="'+(ok?'g':'r')+'">'+w.weight.toFixed(2)+'</td></tr>'; }
     document.getElementById('scoretbl').innerHTML=h+'</table>'; }
+  const wm=document.getElementById('wxmeta'), wt=document.getElementById('wxtbl');
+  if(wm) wm.textContent = s.weatherCheckedAt ? '· checked '+new Date(s.weatherCheckedAt).toISOString().slice(11,16)+'Z' : '';
+  if(wt){ const we=s.weatherEdges||[];
+    if(!we.length) wt.innerHTML='<span style=color:#888>no edges right now — markets unquoted or tracking the forecast (honest). Re-checks every 10 min.</span>';
+    else{ let h='<table><tr><th>CITY</th><th>MARKET</th><th>FC</th><th>MODEL</th><th>MKT</th><th>SIDE</th><th>EDGE</th></tr>';
+      for(const x of we) h+='<tr><td>'+x.city+'</td><td>'+(x.title||'').slice(0,34)+'</td><td>'+x.forecast+'°</td><td>'+(x.modelP*100).toFixed(0)+'%</td><td>'+x.yes_bid+'/'+x.yes_ask+'</td><td>'+x.side+'</td><td class=g>+'+(x.edge*100).toFixed(1)+'¢</td></tr>';
+      wt.innerHTML=h+'</table>'; } }
   const lg=document.getElementById('log'); lg.textContent=(s.logs||[]).join('\\n'); lg.scrollTop=1e9;
 }catch(e){ const lg=document.getElementById('log'); if(lg) lg.textContent='monitor offline: '+e.message; } }
 tick(); setInterval(tick,2000);
@@ -213,8 +273,14 @@ async function executeArb(arb, s){
   // risk gates (re-checked at execution time)
   if (s.killed) return log('KILL SWITCH active — skipping.');
   if (s.open.length >= cfg.MAX_OPEN_POSITIONS) return log('max open positions reached — skipping.');
-  if (exposure(s) + arb.cost > cfg.MAX_EXPOSURE_USD) return log(`exposure cap: ${usd(exposure(s))}+${usd(arb.cost)} > ${usd(cfg.MAX_EXPOSURE_USD)} — skipping.`);
-  if (arb.cost > cfg.MAX_PER_TRADE_USD) return log('per-trade cap exceeded — skipping.');
+  // bankroll-aware sizing: budget = smaller of (per-trade cap, remaining exposure room); both compound with equity.
+  const cap = caps(s), room = Math.max(0, cap.exposure - exposure(s)), budget = Math.min(cap.perTrade, room);
+  if (budget < arb.sum) return log(`no bankroll room: budget ${usd(budget)} < 1 unit ${usd(arb.sum)} (equity ${usd(equity(s))}) — skipping.`);
+  if (arb.cost > budget){ // downsize to fit the bankroll (bounded by book-limited pairs)
+    const pairs = Math.min(arb.pairs, Math.floor(budget / arb.sum));
+    if (pairs < 1) return log(`per-trade budget ${usd(budget)} too small for "${arb.market}" — skipping.`);
+    arb.pairs = pairs; arb.cost = +(pairs*arb.sum).toFixed(4); arb.lockedProfit = +(pairs*(1-arb.sum)).toFixed(4);
+  }
 
   const tag = cfg.LIVE ? 'LIVE' : 'PAPER';
   // CYCLE 1 BUILD [BOT] (2026-05-30): generic multi-leg arb (binary YES+NO or multi-outcome buy-all)
@@ -325,8 +391,9 @@ async function mirrorCopy(sig){
   if (ask != null && sig.price > 0 && ask > sig.price * (1 + cfg.COPY_CHASE_MAX))
     return log(`[copy] skip ${sig.wallet.slice(0,8)} "${(sig.title||'').slice(0,30)}" — chased: ask ${ask} > entry ${sig.price}×${(1+cfg.COPY_CHASE_MAX)}`);
   const fracMult = clamp(s.copyFracMult || 1, 0.5, 2);    // auto-tuned global sizing dial
-  const room = Math.max(0, cfg.MAX_EXPOSURE_USD - exposure(s));
-  const usdcTarget = Math.min(sig.usdc * cfg.COPY_FRACTION * weight * fracMult, cfg.MAX_PER_TRADE_USD, room);
+  const cap = caps(s);                                     // bankroll-aware: compounds with equity
+  const room = Math.max(0, cap.exposure - exposure(s));
+  const usdcTarget = Math.min(sig.usdc * cfg.COPY_FRACTION * weight * fracMult, cap.perTrade, room);
   if (usdcTarget < 0.5) return;
   const shares = entry>0 ? usdcTarget/entry : 0;
   if (shares < 1) return;
@@ -458,11 +525,23 @@ function startForecastLoop(){
   } catch(e){ log('[forecast] '+e.message); } };
   tick(); setInterval(tick, 60000);
 }
+/* ---- CYCLE [BOT] (2026-05-30): weather-edge watch (Kalshi high-temp vs Open-Meteo forecast) ---- */
+function startWeatherLoop(){
+  const tick = async () => { try {
+    const edges = await scanWeather(0.07);
+    const s = loadState(); s.weatherEdges = edges.slice(0,12); s.weatherCheckedAt = Date.now(); saveState(s);
+    if (edges.length) log(`[weather] ${edges.length} edge(s) — top: ${edges[0].city} ${edges[0].title.slice(0,28)} model ${(edges[0].modelP*100).toFixed(0)}% mkt ${edges[0].yes_bid}/${edges[0].yes_ask} → BUY ${edges[0].side} +${(edges[0].edge*100).toFixed(1)}¢`);
+  } catch(e){ log('[weather] '+e.message); } };
+  tick(); setInterval(tick, 600000); // every 10 min
+}
 
 (async function main(){
   log('='.repeat(70));
   log(`Polymarket free-arb bot starting — MODE: ${cfg.LIVE ? '*** LIVE (REAL MONEY) ***' : 'PAPER (dry-run, no orders placed)'}`);
-  log(`caps: $${cfg.MAX_PER_TRADE_USD}/trade · $${cfg.MAX_EXPOSURE_USD} exposure · $${cfg.DAILY_LOSS_KILL_USD} daily-loss kill · ${cfg.MAX_OPEN_POSITIONS} open · min edge ${cfg.MIN_EDGE_CENTS}¢`);
+  { const s0 = loadState(); saveState(s0); const gp = goalProgress(s0); // persist startedAt/seed + print honest goal status
+    log(`bankroll: equity ${usd(gp.equity)} (seed ${usd(gp.start)}) · goal ${usd(gp.goal)} in ${cfg.GOAL_DAYS}d · day ${gp.daysElapsed.toFixed(1)} · need +${gp.reqDaily!=null?(gp.reqDaily*100).toFixed(2):'—'}%/day compounded`);
+    log(`reality check: +${gp.reqDaily!=null?(gp.reqDaily*100).toFixed(2):'—'}%/day every day with no losing days is not achievable by real arb/copy. This tracks ACTUAL results honestly.`); }
+  log(`caps: $${cfg.MAX_PER_TRADE_USD}/trade · $${cfg.MAX_EXPOSURE_USD} exposure ceilings · per-trade ${(cfg.PER_TRADE_FRACTION*100).toFixed(0)}% of equity · $${cfg.DAILY_LOSS_KILL_USD} daily-loss kill · ${cfg.MAX_OPEN_POSITIONS} open · min edge ${cfg.MIN_EDGE_CENTS}¢`);
   if (!cfg.DRY_RUN && !cfg.LIVE) log('WARNING: DRY_RUN=false but live not fully authorized (need CONFIRM_LIVE=I_UNDERSTAND + PRIVATE_KEY). Staying in PAPER mode.');
   log('='.repeat(70));
 
@@ -475,5 +554,6 @@ function startForecastLoop(){
   startCopyLoop(); // smart-money copy runs alongside arb detection
   startLearnLoop(); // self-learning: re-score followed wallets, auto-curate who to copy
   startManageLoop(); // exit logic: mirror whale exits + take-profit/stop, realize P&L (closed loop)
+  startWeatherLoop(); // weather-edge watch (Kalshi temp markets vs free forecast) — surfaces when liquid
   startForecastLoop(); // honest 24h profit-odds estimate from our own results
 })();
