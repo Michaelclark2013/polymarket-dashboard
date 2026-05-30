@@ -1,0 +1,11 @@
+{
+  "_comment": "Candidate wallets for smart-money COPY (paper). These are large active holders pulled from top-holder lists — NOT verified-profitable. EVALUATE each in the dashboard Smart $ inspector (portfolio value + win/loss history) and prune to the genuinely sharp ones before trusting them. Edit freely; one 0x address per entry.",
+  "wallets": [
+    "0xb2a3623364c33561d8312e1edb79eb941c798510",
+    "0x0f0223dc4b5c68f345ac4f0444f2955740b85bfb",
+    "0xde7be6d489bce070a959e0cb813128ae659b5f4b",
+    "0xc6587b11a2209e46dfe3928b31c5514a8e33b784",
+    "0xfd2b117412a698f322b0cd18d6827dad262b8e50",
+    "0x5d0f03cf1243a3e21262d6cf844795afd9fff0ad"
+  ]
+}

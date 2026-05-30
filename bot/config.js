@@ -32,7 +32,7 @@ const config = {
 
   // --- smart-money copy (T1-#2): mirror NEW positions of sharp wallets you follow ---
   // Latency-tolerant edge: a slow client CAN catch these (alpha lives minutes, not ms).
-  FOLLOW_WALLETS: (process.env.FOLLOW_WALLETS||'').split(',').map(s=>s.trim()).filter(Boolean), // 0x addresses
+  FOLLOW_WALLETS: (process.env.FOLLOW_WALLETS||'').split(',').map(s=>s.trim()).filter(Boolean), // 0x addresses (env overrides file)
   COPY_FRACTION: num(process.env.COPY_FRACTION, 0.02),   // size = whale's USDC size × this, clamped to MAX_PER_TRADE_USD
   COPY_POLL_MS:  num(process.env.COPY_POLL_MS, 20000),   // how often to poll followed wallets' activity
   COPY_MIN_USDC: num(process.env.COPY_MIN_USDC, 50),     // ignore a whale trade smaller than this (noise)
@@ -52,6 +52,11 @@ const config = {
   CHAIN_ID: num(process.env.CHAIN_ID, 137),             // Polygon
 };
 config.MIN_USDC_BALANCE = config.MIN_USDC_BALANCE || config.MAX_EXPOSURE_USD;
+
+// fall back to follow_wallets.json if FOLLOW_WALLETS env not set
+if (!config.FOLLOW_WALLETS.length){
+  try { const f = require('./follow_wallets.json'); if (Array.isArray(f.wallets)) config.FOLLOW_WALLETS = f.wallets.filter(w=>/^0x[a-fA-F0-9]{40}$/.test(w)); } catch {}
+}
 
 config.LIVE = !config.DRY_RUN && config.CONFIRM_LIVE === 'I_UNDERSTAND' && !!config.PRIVATE_KEY;
 
