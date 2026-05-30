@@ -78,3 +78,17 @@ YES values for NO bets).
 
 Gate: node --check on extracted inline JS = PASS. Preview smoke test = PASS.
 Commit: cycle 2. Deploy: see deploy log below.
+
+---
+
+## Bot v0.1 — 2026-05-29
+Created bot/ — paper-default free-arb bot (Node 18+), hard risk caps ($5/trade, $25 exposure,
+$20 daily-loss kill, 5 open), kill switch on partial-fill/error, triple-gated live mode,
+secrets gitignored. Ran a real paper scan (60 markets, 0 arbs — honest). Commit b2b1c5b.
+
+## Growth Loop — DISCOVER cycle 1 — 2026-05-29
+Fresh web scan (smart-money tooling + combinatorial arb research). Wrote 5-item active sprint
+to BACKLOG.md (logical/combinatorial arb checker; smart-money wallet tracker; bot multi-
+outcome arb + focus polling; auto Kalshi ref; alert engine). No code changes this phase.
+Next phase: BUILD (scheduled ~25m). Note: dashboard cycle-2 still NOT live (Vercel stuck —
+see DEPLOY_LOG.md); resolve before next deploy window.
